@@ -1,0 +1,5 @@
+[project]
+prefix = "WEASEL"
+
+[flight_levels]
+initiatives_enabled = true
