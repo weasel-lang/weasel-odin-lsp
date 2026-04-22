@@ -4,14 +4,14 @@ level: task
 title: "Implement transpiler: component calls with children proc callback"
 short_code: "WEASEL-T-0006"
 created_at: 2026-04-21T22:11:42.917418+00:00
-updated_at: 2026-04-21T22:11:42.917418+00:00
+updated_at: 2026-04-22T12:38:36.130977+00:00
 parent: WEASEL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -32,6 +32,10 @@ Extend the transpiler to emit component template calls for Weasel elements that 
 
 ## Acceptance Criteria
 
+## Acceptance Criteria
+
+## Acceptance Criteria
+
 - [ ] Elements resolved as template procs (via the WEASEL-A-0002 heuristic) are emitted as proc calls: `tag_name(w, &Tag_Props{...}) or_return`
 - [ ] Dotted names (`ui.card`) are emitted as qualified calls: `ui.card(w, &Card_Props{...}) or_return`
 - [ ] Attributes on component tags map to struct fields in a composite literal passed as a pointer: `title="Task"` → `&Card_Props{title = "Task"}`
@@ -40,54 +44,6 @@ Extend the transpiler to emit component template calls for Weasel elements that 
 - [ ] The nested children inside the anonymous proc are themselves fully transpiled (recursion)
 - [ ] Passing child content to a component that has no `<slot />` in its definition is a transpile-time error
 - [ ] Blocked by WEASEL-T-0004 (core transpiler)
-
-## Test Cases **[CONDITIONAL: Testing Task]**
-
-{Delete unless this is a testing task}
-
-### Test Case 1: {Test Case Name}
-- **Test ID**: TC-001
-- **Preconditions**: {What must be true before testing}
-- **Steps**: 
-  1. {Step 1}
-  2. {Step 2}
-  3. {Step 3}
-- **Expected Results**: {What should happen}
-- **Actual Results**: {To be filled during execution}
-- **Status**: {Pass/Fail/Blocked}
-
-### Test Case 2: {Test Case Name}
-- **Test ID**: TC-002
-- **Preconditions**: {What must be true before testing}
-- **Steps**: 
-  1. {Step 1}
-  2. {Step 2}
-- **Expected Results**: {What should happen}
-- **Actual Results**: {To be filled during execution}
-- **Status**: {Pass/Fail/Blocked}
-
-## Documentation Sections **[CONDITIONAL: Documentation Task]**
-
-{Delete unless this is a documentation task}
-
-### User Guide Content
-- **Feature Description**: {What this feature does and why it's useful}
-- **Prerequisites**: {What users need before using this feature}
-- **Step-by-Step Instructions**:
-  1. {Step 1 with screenshots/examples}
-  2. {Step 2 with screenshots/examples}
-  3. {Step 3 with screenshots/examples}
-
-### Troubleshooting Guide
-- **Common Issue 1**: {Problem description and solution}
-- **Common Issue 2**: {Problem description and solution}
-- **Error Messages**: {List of error messages and what they mean}
-
-### API Documentation **[CONDITIONAL: API Documentation]**
-- **Endpoint**: {API endpoint description}
-- **Parameters**: {Required and optional parameters}
-- **Example Request**: {Code example}
-- **Example Response**: {Expected response format}
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -104,4 +60,24 @@ Anonymous proc literals in Odin capture outer variables by reference. If the com
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+Implemented `_emit_component` in `transpiler/transpile.odin` and added 11 new tests in `transpiler/transpile_test.odin`. All 93 tests pass.
+
+**Changes made:**
+
+- Added `import "core:fmt"` to transpile.odin
+- In `transpile`: build a `known map[string]bool` (template name → has_slot) pre-pass over the top-level nodes, then thread it through all emitter procs
+- Updated signatures of all `@(private = "file")` emitters to accept `known map[string]bool`
+- Replaced the `.Component` error stub in `_emit_element` with a call to new `_emit_component`
+- Added `_write_props_name`: writes the Props struct name from a tag (e.g. `"ui.card"` → `"Card_Props"`)
+- Added `_emit_component`: emits `tag(w[, &Tag_Props{...}][, proc callback]) or_return`
+
+**All acceptance criteria met:**
+- Self-closing component → `tag(w) or_return` (no children arg)
+- Attrs → `&Tag_Props{field = val, ...}` composite literal
+- Static and dynamic attrs both handled
+- Dotted names (`ui.card`) → qualified calls with `Card_Props` from last segment
+- Children → anonymous `proc(w: io.Writer) -> io.Error { ... return nil }` callback
+- Children recursively transpiled
+- Slotless-component-with-children → transpile error (for same-file templates via `known` map)

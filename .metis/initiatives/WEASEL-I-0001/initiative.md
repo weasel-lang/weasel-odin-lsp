@@ -4,14 +4,14 @@ level: initiative
 title: "Weasel parser and transpiler"
 short_code: "WEASEL-I-0001"
 created_at: 2026-04-21T21:55:13.088260+00:00
-updated_at: 2026-04-21T22:11:25.048757+00:00
+updated_at: 2026-04-22T14:01:26.664305+00:00
 parent: WEASEL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/completed"
 
 
 exit_criteria_met: false

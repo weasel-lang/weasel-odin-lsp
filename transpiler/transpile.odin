@@ -20,6 +20,7 @@
 */
 package transpiler
 
+import "core:fmt"
 import "core:strings"
 
 // Transpile_Error records a single problem encountered while emitting code.
@@ -36,8 +37,19 @@ transpile :: proc(
 ) -> (source: string, errs: [dynamic]Transpile_Error) {
 	errs = make([dynamic]Transpile_Error, allocator)
 	sb := strings.builder_make(allocator)
+
+	// Build a map of template proc names to their has_slot status so that
+	// component call sites in the same file can be validated at transpile time.
+	known := make(map[string]bool, allocator)
+	defer delete(known)
 	for node in nodes {
-		_emit_node(&sb, node, &errs, false)
+		if tp, ok := node.(Template_Proc); ok {
+			known[tp.name] = tp.has_slot
+		}
+	}
+
+	for node in nodes {
+		_emit_node(&sb, node, &errs, false, known)
 	}
 	source = strings.to_string(sb)
 	return
@@ -93,10 +105,11 @@ _write_string_literal_content :: proc(sb: ^strings.Builder, s: string) {
 // are emitted: verbatim when false, as a raw-string write call when true.
 @(private = "file")
 _emit_node :: proc(
-	sb: ^strings.Builder,
-	node: Node,
-	errs: ^[dynamic]Transpile_Error,
+	sb:      ^strings.Builder,
+	node:    Node,
+	errs:    ^[dynamic]Transpile_Error,
 	in_html: bool,
+	known:   map[string]bool,
 ) {
 	switch n in node {
 	case Odin_Span:
@@ -114,19 +127,20 @@ _emit_node :: proc(
 		strings.write_string(sb, n.expr)
 		strings.write_string(sb, ") or_return\n")
 	case Element_Node:
-		_emit_element(sb, n, errs)
+		_emit_element(sb, n, errs, known)
 	case Odin_Block:
-		_emit_odin_block(sb, n, errs)
+		_emit_odin_block(sb, n, errs, known)
 	case Template_Proc:
-		_emit_template_proc(sb, n, errs)
+		_emit_template_proc(sb, n, errs, known)
 	}
 }
 
 @(private = "file")
 _emit_template_proc :: proc(
-	sb: ^strings.Builder,
-	n: Template_Proc,
-	errs: ^[dynamic]Transpile_Error,
+	sb:    ^strings.Builder,
+	n:     Template_Proc,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
 ) {
 	// name :: proc(w: io.Writer[, user-params][, children callback]) -> io.Error {
 	strings.write_string(sb, n.name)
@@ -142,14 +156,19 @@ _emit_template_proc :: proc(
 
 	// Template body is Odin context: Odin_Span nodes are verbatim source.
 	for node in n.body {
-		_emit_node(sb, node, errs, false)
+		_emit_node(sb, node, errs, false, known)
 	}
 
 	strings.write_string(sb, "}\n")
 }
 
 @(private = "file")
-_emit_element :: proc(sb: ^strings.Builder, n: Element_Node, errs: ^[dynamic]Transpile_Error) {
+_emit_element :: proc(
+	sb:    ^strings.Builder,
+	n:     Element_Node,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
+) {
 	// <slot /> invokes the caller-supplied children callback.
 	if n.tag == "slot" {
 		strings.write_string(sb, "children(w) or_return\n")
@@ -157,36 +176,31 @@ _emit_element :: proc(sb: ^strings.Builder, n: Element_Node, errs: ^[dynamic]Tra
 	}
 	switch n.kind {
 	case .Raw:
-		_emit_raw_element(sb, n, errs)
+		_emit_raw_element(sb, n, errs, known)
 	case .Component:
-		// Component call emission is deferred to T-0006.
-		append(
-			errs,
-			Transpile_Error{message = "component call emission not yet implemented", pos = n.pos},
-		)
+		_emit_component(sb, n, errs, known)
 	}
 }
 
 @(private = "file")
-_emit_raw_element :: proc(sb: ^strings.Builder, n: Element_Node, errs: ^[dynamic]Transpile_Error) {
+_emit_raw_element :: proc(
+	sb:    ^strings.Builder,
+	n:     Element_Node,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
+) {
 	// HTML5 void elements are self-closing: emit a single combined string.
 	if _is_void_element(n.tag) {
-		strings.write_string(sb, `__weasel_write_raw_string(w, "<`)
-		strings.write_string(sb, n.tag)
-		strings.write_string(sb, `/>") or_return`)
-		strings.write_byte(sb, '\n')
+		_emit_open_tag(sb, n.tag, n.attrs, true)
 		return
 	}
 
-	// Open tag.
-	strings.write_string(sb, `__weasel_write_raw_string(w, "<`)
-	strings.write_string(sb, n.tag)
-	strings.write_string(sb, `>") or_return`)
-	strings.write_byte(sb, '\n')
+	// Open tag (with attributes).
+	_emit_open_tag(sb, n.tag, n.attrs, false)
 
 	// Children are HTML context: Odin_Span nodes are text content.
 	for child in n.children {
-		_emit_node(sb, child, errs, true)
+		_emit_node(sb, child, errs, true, known)
 	}
 
 	// Close tag.
@@ -196,14 +210,185 @@ _emit_raw_element :: proc(sb: ^strings.Builder, n: Element_Node, errs: ^[dynamic
 	strings.write_byte(sb, '\n')
 }
 
+// _emit_open_tag emits one or more write calls that together produce the element
+// opening tag (or self-closing tag when self_close is true).  Static attributes
+// are folded into the raw-string literal; each dynamic attribute splits the
+// literal: the prefix up to and including the attribute name and opening quote
+// is flushed, then the expression is emitted via fmt.wprint, then accumulation
+// continues from the closing quote of the attribute value.
 @(private = "file")
-_emit_odin_block :: proc(sb: ^strings.Builder, n: Odin_Block, errs: ^[dynamic]Transpile_Error) {
+_emit_open_tag :: proc(
+	sb:         ^strings.Builder,
+	tag:        string,
+	attrs:      [dynamic]Attr,
+	self_close: bool,
+) {
+	// pending accumulates raw HTML text for the open tag.  It is flushed to sb
+	// as a __weasel_write_raw_string call whenever a dynamic attribute is
+	// encountered (or at the very end).
+	pending := strings.builder_make()
+	defer strings.builder_destroy(&pending)
+
+	// Start with "<tag".
+	strings.write_byte(&pending, '<')
+	strings.write_string(&pending, tag)
+
+	for attr in attrs {
+		if attr.is_dynamic {
+			// Append ` name="` to pending, flush, then emit the expression.
+			strings.write_byte(&pending, ' ')
+			strings.write_string(&pending, attr.name)
+			strings.write_string(&pending, `="`)
+			_flush_pending(sb, &pending)
+			strings.write_string(sb, "fmt.wprint(w, ")
+			strings.write_string(sb, attr.expr)
+			strings.write_string(sb, ")\n")
+			// Pending resumes from the closing quote of the attribute value.
+			strings.write_byte(&pending, '"')
+		} else {
+			// Static attribute: ` name="value"` or boolean ` name`.
+			strings.write_byte(&pending, ' ')
+			strings.write_string(&pending, attr.name)
+			if len(attr.value) > 0 {
+				strings.write_string(&pending, `="`)
+				strings.write_string(&pending, attr.value)
+				strings.write_byte(&pending, '"')
+			}
+		}
+	}
+
+	// Append the closing `>` or `/>` and flush.
+	if self_close {
+		strings.write_string(&pending, "/>")
+	} else {
+		strings.write_byte(&pending, '>')
+	}
+	_flush_pending(sb, &pending)
+}
+
+// _flush_pending emits the current content of pending as a
+// __weasel_write_raw_string call and resets the builder.  No-ops when pending
+// is empty.
+@(private = "file")
+_flush_pending :: proc(sb: ^strings.Builder, pending: ^strings.Builder) {
+	content := strings.to_string(pending^)
+	if len(content) == 0 {return}
+	strings.write_string(sb, `__weasel_write_raw_string(w, "`)
+	_write_string_literal_content(sb, content)
+	strings.write_string(sb, `") or_return`)
+	strings.write_byte(sb, '\n')
+	strings.builder_reset(pending)
+}
+
+// _write_props_name appends the component's Props struct name to sb.
+// "card" → "Card_Props", "ui.card" → "Card_Props" (last segment, first letter uppercased).
+@(private = "file")
+_write_props_name :: proc(sb: ^strings.Builder, tag: string) {
+	local := tag
+	if dot := strings.last_index(tag, "."); dot >= 0 {
+		local = tag[dot + 1:]
+	}
+	if len(local) > 0 {
+		c := local[0]
+		if c >= 'a' && c <= 'z' {
+			strings.write_byte(sb, c - ('a' - 'A'))
+		} else {
+			strings.write_byte(sb, c)
+		}
+		strings.write_string(sb, local[1:])
+	}
+	strings.write_string(sb, "_Props")
+}
+
+// _emit_component emits a template proc call for a Component-kind Element_Node.
+//
+// Emission rules:
+//   No attrs, no children:   tag(w) or_return
+//   Has attrs, no children:  tag(w, &Tag_Props{field = val, ...}) or_return
+//   No attrs, has children:  tag(w, proc(w: io.Writer) -> io.Error { ... return nil }) or_return
+//   Has attrs, has children: tag(w, &Tag_Props{...}, proc(w: io.Writer) -> io.Error { ... return nil }) or_return
+//
+// Passing children to a template known (in the same file) to have no <slot /> is a transpile error.
+@(private = "file")
+_emit_component :: proc(
+	sb:    ^strings.Builder,
+	n:     Element_Node,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
+) {
+	has_children := len(n.children) > 0
+
+	// Validate children against same-file template definitions.
+	if has_children {
+		if has_slot, is_known := known[n.tag]; is_known && !has_slot {
+			append(
+				errs,
+				Transpile_Error{
+					message = fmt.aprintf(
+						"component '%s' has no <slot />, cannot pass children",
+						n.tag,
+					),
+					pos = n.pos,
+				},
+			)
+			return
+		}
+	}
+
+	// Emit the call name (verbatim; may be dotted e.g. "ui.card").
+	strings.write_string(sb, n.tag)
+	strings.write_string(sb, "(w")
+
+	// Props struct argument (only when attributes are present).
+	if len(n.attrs) > 0 {
+		strings.write_string(sb, ", &")
+		_write_props_name(sb, n.tag)
+		strings.write_byte(sb, '{')
+		for i in 0 ..< len(n.attrs) {
+			if i > 0 {
+				strings.write_string(sb, ", ")
+			}
+			attr := n.attrs[i]
+			strings.write_string(sb, attr.name)
+			strings.write_string(sb, " = ")
+			if attr.is_dynamic {
+				strings.write_string(sb, attr.expr)
+			} else {
+				strings.write_byte(sb, '"')
+				_write_string_literal_content(sb, attr.value)
+				strings.write_byte(sb, '"')
+			}
+		}
+		strings.write_byte(sb, '}')
+	}
+
+	// Anonymous proc callback (only when child nodes are present).
+	if has_children {
+		strings.write_string(sb, ", proc(w: io.Writer) -> io.Error {\n")
+		for child in n.children {
+			_emit_node(sb, child, errs, true, known)
+		}
+		strings.write_string(sb, "return nil\n}")
+	}
+
+	strings.write_string(sb, ") or_return\n")
+}
+
+@(private = "file")
+_emit_odin_block :: proc(
+	sb:    ^strings.Builder,
+	n:     Odin_Block,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
+) {
 	strings.write_string(sb, n.head)
 	strings.write_byte(sb, '{')
 	strings.write_byte(sb, '\n')
-	// Children of an Odin_Block are HTML context (the block wraps element output).
+	// Odin_Block children are in Odin context: Odin_Span nodes (e.g. case labels,
+	// comments) are emitted verbatim.  Element_Node children emit their own HTML
+	// write calls regardless of the in_html flag.
 	for child in n.children {
-		_emit_node(sb, child, errs, true)
+		_emit_node(sb, child, errs, false, known)
 	}
 	if len(n.tail) > 0 {
 		strings.write_string(sb, n.tail)

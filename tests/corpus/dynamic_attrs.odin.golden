@@ -1,0 +1,5 @@
+__weasel_write_raw_string(w, "<div id=\"") or_return
+fmt.wprint(w, eid)
+__weasel_write_raw_string(w, "\" class=\"box\">") or_return
+__weasel_write_raw_string(w, "</div>") or_return
+

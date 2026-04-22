@@ -1,0 +1,27 @@
+__weasel_write_raw_string(w, "<ul>") or_return
+for item in items {
+__weasel_write_raw_string(w, "<li>") or_return
+__weasel_write_escaped_string(w, item.name) or_return
+__weasel_write_raw_string(w, "</li>") or_return
+}
+__weasel_write_raw_string(w, "</ul>") or_return
+
+__weasel_write_raw_string(w, "<div>") or_return
+if show {
+__weasel_write_raw_string(w, "<span>") or_return
+__weasel_write_raw_string(w, "visible") or_return
+__weasel_write_raw_string(w, "</span>") or_return
+}
+__weasel_write_raw_string(w, "</div>") or_return
+
+__weasel_write_raw_string(w, "<div>") or_return
+switch kind {
+case .A: __weasel_write_raw_string(w, "<em>") or_return
+__weasel_write_raw_string(w, "Alpha") or_return
+__weasel_write_raw_string(w, "</em>") or_return
+case .B: __weasel_write_raw_string(w, "<em>") or_return
+__weasel_write_raw_string(w, "Beta") or_return
+__weasel_write_raw_string(w, "</em>") or_return
+}
+__weasel_write_raw_string(w, "</div>") or_return
+

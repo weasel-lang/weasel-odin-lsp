@@ -324,6 +324,315 @@ test_transpile_static_text_escaping :: proc(t: ^testing.T) {
 // Odin_Block (control-flow with nested elements)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Attribute handling
+// ---------------------------------------------------------------------------
+
+@(test)
+test_transpile_static_attr_folded_into_open_tag :: proc(t: ^testing.T) {
+	// Static attribute must be folded into the opening tag string literal.
+	src, errs := _spt(`<div class="card"></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<div class=\"card\">") or_return`),
+		`expected static attr folded into open-tag string`,
+	)
+}
+
+@(test)
+test_transpile_multiple_static_attrs :: proc(t: ^testing.T) {
+	src, errs := _spt(`<a href="/home" class="nav">link</a>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<a href=\"/home\" class=\"nav\">") or_return`),
+		`expected both static attrs in single open-tag string`,
+	)
+}
+
+@(test)
+test_transpile_dynamic_attr_splits_string :: proc(t: ^testing.T) {
+	// Dynamic attr must split: prefix raw_string, fmt.wprint, suffix raw_string.
+	src, errs := _spt(`<div class={cls}></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<div class=\"") or_return`),
+		`expected open-tag prefix before dynamic attr`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, "fmt.wprint(w, cls)"),
+		`expected fmt.wprint call for dynamic attr value`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "\">") or_return`),
+		`expected closing quote + > after dynamic attr`,
+	)
+}
+
+@(test)
+test_transpile_dynamic_attr_ordering :: proc(t: ^testing.T) {
+	// Prefix must appear before fmt.wprint which must appear before suffix.
+	src, errs := _spt(`<div class={cls}></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	prefix_pos := strings.index(src, `"<div class=\""`)
+	wprint_pos := strings.index(src, "fmt.wprint(w, cls)")
+	suffix_pos := strings.index(src, `"\">`)
+
+	testing.expect(t, prefix_pos >= 0, "prefix not found")
+	testing.expect(t, wprint_pos >= 0, "fmt.wprint not found")
+	testing.expect(t, suffix_pos >= 0, "suffix not found")
+	testing.expect(t, prefix_pos < wprint_pos, "prefix must precede fmt.wprint")
+	testing.expect(t, wprint_pos < suffix_pos, "fmt.wprint must precede suffix")
+}
+
+@(test)
+test_transpile_mixed_static_and_dynamic_attrs :: proc(t: ^testing.T) {
+	// Static attrs before the dynamic one must be folded into the prefix string.
+	src, errs := _spt(`<input type="text" value={val} />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<input type=\"text\" value=\"") or_return`),
+		`expected static attr included in prefix`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, "fmt.wprint(w, val)"),
+		`expected fmt.wprint for dynamic attr`,
+	)
+}
+
+@(test)
+test_transpile_static_after_dynamic_attr :: proc(t: ^testing.T) {
+	// Static attr after a dynamic one must be in the suffix string.
+	src, errs := _spt(`<div id={eid} class="box"></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, "fmt.wprint(w, eid)"),
+		`expected fmt.wprint for dynamic attr`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "\" class=\"box\">") or_return`),
+		`expected static attr and closing > in suffix`,
+	)
+}
+
+@(test)
+test_transpile_void_element_with_static_attr :: proc(t: ^testing.T) {
+	src, errs := _spt(`<img src="logo.png" />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<img src=\"logo.png\"/>") or_return`),
+		`expected static attr in void element`,
+	)
+}
+
+@(test)
+test_transpile_void_element_with_dynamic_attr :: proc(t: ^testing.T) {
+	src, errs := _spt(`<input value={v} />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<input value=\"") or_return`),
+		`expected prefix for void element with dynamic attr`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, "fmt.wprint(w, v)"),
+		`expected fmt.wprint for void element dynamic attr`,
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "\"/>") or_return`),
+		`expected self-close suffix for void element`,
+	)
+}
+
+@(test)
+test_transpile_dynamic_attr_expr_verbatim :: proc(t: ^testing.T) {
+	// Complex expressions must be emitted verbatim without transformation.
+	src, errs := _spt(`<div id={p.user.id}></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, "fmt.wprint(w, p.user.id)"),
+		`expected complex expr emitted verbatim`,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Odin_Block (control-flow with nested elements)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Component call emission
+// ---------------------------------------------------------------------------
+
+@(test)
+test_transpile_component_self_close_no_attrs :: proc(t: ^testing.T) {
+	// <card /> with no attributes → card(w) or_return
+	src, errs := _spt("<card />")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, src, "card(w) or_return\n")
+}
+
+@(test)
+test_transpile_component_self_close_with_static_attr :: proc(t: ^testing.T) {
+	// <card title="Task" /> → card(w, &Card_Props{title = "Task"}) or_return
+	src, errs := _spt(`<card title="Task" />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, src, `card(w, &Card_Props{title = "Task"}) or_return` + "\n")
+}
+
+@(test)
+test_transpile_component_self_close_with_dynamic_attr :: proc(t: ^testing.T) {
+	// <card title={t} /> → card(w, &Card_Props{title = t}) or_return
+	src, errs := _spt("<card title={t} />")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, src, "card(w, &Card_Props{title = t}) or_return\n")
+}
+
+@(test)
+test_transpile_component_with_children_no_attrs :: proc(t: ^testing.T) {
+	// <card><p></p></card> → card(w, proc(w: io.Writer) -> io.Error { ... return nil }) or_return
+	src, errs := _spt("<card><p></p></card>")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.has_prefix(src, "card(w, proc(w: io.Writer) -> io.Error {"),
+		"expected component call with anonymous proc",
+	)
+	testing.expect(t, strings.contains(src, "return nil\n}") , "expected return nil in proc")
+	testing.expect(t, strings.contains(src, ") or_return"), "expected or_return after call")
+	testing.expect(
+		t,
+		strings.contains(src, `__weasel_write_raw_string(w, "<p>") or_return`),
+		"expected p open inside callback",
+	)
+}
+
+@(test)
+test_transpile_component_with_attrs_and_children :: proc(t: ^testing.T) {
+	// <card title="x"><p></p></card> → card(w, &Card_Props{title = "x"}, proc(...) { ... }) or_return
+	src, errs := _spt(`<card title="x"><p></p></card>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `card(w, &Card_Props{title = "x"}, proc(w: io.Writer) -> io.Error {`),
+		"expected card call with props and children callback",
+	)
+	testing.expect(t, strings.contains(src, "return nil\n}") , "expected return nil in proc")
+	testing.expect(t, strings.contains(src, ") or_return"), "expected or_return after call")
+}
+
+@(test)
+test_transpile_component_dotted_name :: proc(t: ^testing.T) {
+	// <ui.card title="x" /> → ui.card(w, &Card_Props{title = "x"}) or_return
+	src, errs := _spt(`<ui.card title="x" />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, src, `ui.card(w, &Card_Props{title = "x"}) or_return` + "\n")
+}
+
+@(test)
+test_transpile_component_dotted_name_no_attrs :: proc(t: ^testing.T) {
+	// <ui.card /> → ui.card(w) or_return
+	src, errs := _spt("<ui.card />")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, src, "ui.card(w) or_return\n")
+}
+
+@(test)
+test_transpile_component_multiple_attrs :: proc(t: ^testing.T) {
+	// Multiple attrs folded into the struct literal.
+	src, errs := _spt(`<card title="Hello" size={n} />`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `&Card_Props{title = "Hello", size = n}`),
+		"expected both attrs in composite literal",
+	)
+}
+
+@(test)
+test_transpile_component_children_slotless_error :: proc(t: ^testing.T) {
+	// Passing children to a template without <slot /> is a transpile error.
+	// Define a slotless template in the same source, then call it with children.
+	src, errs := _spt("plain :: template() {\n<div></div>\n}\n<plain><p></p></plain>")
+	defer delete(errs)
+
+	testing.expect(t, len(errs) > 0, "expected a transpile error for children on slotless component")
+	_ = src
+}
+
+@(test)
+test_transpile_component_children_recursive :: proc(t: ^testing.T) {
+	// Children inside the callback are themselves transpiled recursively.
+	src, errs := _spt("<card><span>{msg}</span></card>")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, "__weasel_write_escaped_string(w, msg) or_return"),
+		"expected recursive transpilation of inline expr inside callback",
+	)
+}
+
+@(test)
+test_transpile_component_in_template :: proc(t: ^testing.T) {
+	// Component calls inside a template body are also transpiled.
+	src, errs := _spt("page :: template() {\n<card title=\"hi\" />\n}")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `card(w, &Card_Props{title = "hi"}) or_return`),
+		"expected component call inside template body",
+	)
+}
+
 @(test)
 test_transpile_odin_block_for :: proc(t: ^testing.T) {
 	src, errs := _spt("<ul>{for item in items { <li></li>\n}}</ul>")

@@ -1,0 +1,4 @@
+__weasel_write_raw_string(w, "<div>") or_return
+__weasel_write_raw_string(w, "Hello, world!") or_return
+__weasel_write_raw_string(w, "</div>") or_return
+

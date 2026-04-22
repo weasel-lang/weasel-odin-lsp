@@ -4,14 +4,14 @@ level: task
 title: "Implement weasel CLI tool (weasel build)"
 short_code: "WEASEL-T-0007"
 created_at: 2026-04-21T22:11:45.900088+00:00
-updated_at: 2026-04-21T22:11:45.900088+00:00
+updated_at: 2026-04-22T13:22:27.265480+00:00
 parent: WEASEL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -29,6 +29,10 @@ initiative_id: WEASEL-I-0001
 ## Objective
 
 Implement the `weasel build` CLI command that accepts one or more `.weasel` source files, runs the lexer → registry → parser → transpiler pipeline, and writes the resulting `.odin` files to disk.
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
@@ -102,4 +106,21 @@ The CLI is the integration point — it should be implemented last so the pipeli
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+Created `cmd/main.odin` (`package main`) with the following structure:
+
+- `main`: parses `build` subcommand, `--out <dir>` and `--force` flags, processes each input file
+- `_out_path`: computes output `.odin` path alongside input or in `--out` dir using `filepath.stem` + `filepath.join`
+- `_is_up_to_date`: compares mtime via `os.stat` + `time.time_to_unix_nano`; skips if output is at least as new as input
+- `_build_file`: runs the full `transpiler.scan → transpiler.parse → transpiler.transpile` pipeline and writes output with `os.write_entire_file`
+
+All acceptance criteria verified:
+- [x] `weasel build <file.weasel>` writes `<file.odin>` alongside the input file
+- [x] Multiple file arguments supported
+- [x] Non-zero exit code + descriptive error on parse/transpile failure (tested with malformed input)
+- [x] `--out <dir>` flag redirects output to specified directory
+- [x] Skips up-to-date files (mtime comparison), respects `--force`
+- [x] Prints per-file `build`/`skip` lines plus a summary on success
+
+Build command: `odin build cmd -out:weasel`

@@ -4,14 +4,14 @@ level: task
 title: "Build round-trip test suite for transpiler output"
 short_code: "WEASEL-T-0008"
 created_at: 2026-04-21T22:11:48.952763+00:00
-updated_at: 2026-04-21T22:11:48.952763+00:00
+updated_at: 2026-04-22T14:00:42.505513+00:00
 parent: WEASEL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -32,69 +32,25 @@ Build a round-trip test suite that feeds `.weasel` input through the full pipeli
 
 ## Acceptance Criteria
 
+## Acceptance Criteria
+
+## Acceptance Criteria
+
 - [ ] Golden file test for raw element emission: `<div>text</div>` → expected Odin output
 - [ ] Golden file test for template proc signature rewrite
 - [ ] Golden file test for static attributes
 - [ ] Golden file test for dynamic attributes
 - [ ] Golden file test for component call without children
 - [ ] Golden file test for component call with nested children (anonymous proc callback)
-- [ ] Golden file test for inline Odin control flow (`for`, `if`) inside elements
+- [ ] Golden file test for inline Odin control flow (`for`, `if`, `switch`) inside elements
 - [ ] Test runner reports diff on mismatch, with option to update golden files (`--update`)
-
-## Test Cases **[CONDITIONAL: Testing Task]**
-
-{Delete unless this is a testing task}
-
-### Test Case 1: {Test Case Name}
-- **Test ID**: TC-001
-- **Preconditions**: {What must be true before testing}
-- **Steps**: 
-  1. {Step 1}
-  2. {Step 2}
-  3. {Step 3}
-- **Expected Results**: {What should happen}
-- **Actual Results**: {To be filled during execution}
-- **Status**: {Pass/Fail/Blocked}
-
-### Test Case 2: {Test Case Name}
-- **Test ID**: TC-002
-- **Preconditions**: {What must be true before testing}
-- **Steps**: 
-  1. {Step 1}
-  2. {Step 2}
-- **Expected Results**: {What should happen}
-- **Actual Results**: {To be filled during execution}
-- **Status**: {Pass/Fail/Blocked}
-
-## Documentation Sections **[CONDITIONAL: Documentation Task]**
-
-{Delete unless this is a documentation task}
-
-### User Guide Content
-- **Feature Description**: {What this feature does and why it's useful}
-- **Prerequisites**: {What users need before using this feature}
-- **Step-by-Step Instructions**:
-  1. {Step 1 with screenshots/examples}
-  2. {Step 2 with screenshots/examples}
-  3. {Step 3 with screenshots/examples}
-
-### Troubleshooting Guide
-- **Common Issue 1**: {Problem description and solution}
-- **Common Issue 2**: {Problem description and solution}
-- **Error Messages**: {List of error messages and what they mean}
-
-### API Documentation **[CONDITIONAL: API Documentation]**
-- **Endpoint**: {API endpoint description}
-- **Parameters**: {Required and optional parameters}
-- **Example Request**: {Code example}
-- **Example Response**: {Expected response format}
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
 {Keep for technical tasks, delete for non-technical. Technical details, approach, or important considerations}
 
 ### Technical Approach
-Golden file approach: `tests/fixtures/` contains pairs of `.weasel` input and `.odin.golden` expected output. Test runner calls the pipeline directly (not via CLI) and diffs the result. `--update` flag overwrites golden files for easy snapshot updates.
+Golden file approach: `tests/corpus/` contains pairs of `.weasel` input and `.odin.golden` expected output. Test runner calls the pipeline directly (not via CLI) and diffs the result. `--update` flag overwrites golden files for easy snapshot updates.
 
 ### Dependencies
 All transpiler tasks (WEASEL-T-0004, WEASEL-T-0005, WEASEL-T-0006)
@@ -104,4 +60,23 @@ Golden files will need updating whenever the emitted code format changes (e.g. w
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+**Transpiler fix**: Changed `_emit_odin_block` to emit `Odin_Span` children with `in_html=false` (Odin context) instead of `in_html=true` (HTML context). This fixes `switch` case labels being incorrectly emitted as `__weasel_write_raw_string` calls. All 93 existing unit tests still pass.
+
+**Test runner**: Created `tests/main.odin` — a standalone Odin binary (`package corpus_tests`) that:
+- Globs `tests/corpus/*.weasel` (or `--corpus <dir>`)
+- Transpiles each fixture through the full pipeline
+- Diffs output against `.odin.golden` file; reports line-level differences on mismatch
+- Accepts `--update` flag to overwrite golden files
+
+**Corpus fixtures** (`tests/corpus/`):
+- `raw_element.weasel` — `<div>Hello, world!</div>` covers basic open/text/close emission
+- `template_proc.weasel` — `greet :: template(name: string)` covers signature rewrite + body
+- `static_attrs.weasel` — `<a href="/home" class="nav">` covers static attr folding
+- `dynamic_attrs.weasel` — `<div id={eid} class="box">` covers dynamic attr splitting
+- `component_no_children.weasel` — `<card title="Hello" size={n} />` covers props struct emit
+- `component_with_children.weasel` — `<layout><p>{msg}</p></layout>` covers anonymous proc callback
+- `control_flow.weasel` — `for`, `if`, `switch` all in one fixture; switch case labels now emit correctly
+
+All 7 golden files generated and all 7 tests pass. Running: `odin run tests/` or `odin run tests/ -- --update`.

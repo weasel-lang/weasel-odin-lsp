@@ -1,0 +1,2 @@
+card(w, &Card_Props{title = "Hello", size = n}) or_return
+
