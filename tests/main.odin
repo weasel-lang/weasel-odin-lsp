@@ -151,8 +151,9 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 		return "", false
 	}
 
-	result, transpile_errs := transpiler.transpile(nodes[:])
+	result, smap, transpile_errs := transpiler.transpile(nodes[:])
 	defer delete(transpile_errs)
+	defer transpiler.source_map_destroy(&smap)
 	if len(transpile_errs) > 0 {
 		fmt.eprintfln("FAIL  %s: transpile errors:", display_name)
 		for e in transpile_errs {

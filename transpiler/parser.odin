@@ -69,12 +69,19 @@ Odin_Block :: struct {
 
 // Template_Proc is a top-level Weasel template function declaration.
 // has_slot is true when the body (recursively) contains a <slot /> element.
+//
+// Position fields:
+//   pos        — start of the enclosing Odin_Text token (unchanged legacy field)
+//   name_pos   — start of the template name identifier in the .weasel source
+//   params_pos — start of the parameter list (byte after the opening '(')
 Template_Proc :: struct {
-	name:     string,
-	params:   string, // verbatim parameter list, without surrounding parens
-	body:     [dynamic]Node,
-	has_slot: bool,
-	pos:      Position,
+	name:       string,
+	params:     string, // verbatim parameter list, without surrounding parens
+	body:       [dynamic]Node,
+	has_slot:   bool,
+	pos:        Position,
+	name_pos:   Position,
+	params_pos: Position,
 }
 
 Node :: union {
@@ -223,10 +230,14 @@ _brace_scan :: proc(text: string, initial_depth: int, zero_at: ^int) -> int {
 // ---------------------------------------------------------------------------
 
 _Template_Decl :: struct {
-	name:   string,
-	params: string,
-	prefix: string, // Odin text before the declaration
-	suffix: string, // Odin text after the opening '{'
+	name:       string,
+	params:     string,
+	prefix:     string, // Odin text before the declaration
+	suffix:     string, // Odin text after the opening '{'
+	// Byte offsets into the containing Odin_Text token's value, used by the
+	// caller to compute precise .weasel positions via advance_position.
+	name_off:   int,
+	params_off: int,
 }
 
 // _find_template_decl searches text for "name :: template(params) {" and
@@ -281,10 +292,12 @@ _find_template_decl :: proc(text: string) -> (decl: _Template_Decl, found: bool)
 	j += 1 // consume '{'
 
 	return _Template_Decl{
-		name   = text[name_start:name_end],
-		params = params,
-		prefix = text[:name_start],
-		suffix = text[j:],
+		name       = text[name_start:name_end],
+		params     = params,
+		prefix     = text[:name_start],
+		suffix     = text[j:],
+		name_off   = name_start,
+		params_off = params_start,
 	}, true
 }
 
@@ -421,6 +434,8 @@ _parse_file :: proc(p: ^_Parser, allocator := context.allocator) -> [dynamic]Nod
 					append(&nodes, Odin_Span{text = decl.prefix, pos = tok.pos})
 				}
 				tp := _parse_template(p, decl, tok.pos, allocator)
+				tp.name_pos   = advance_position(tok.pos, tok.value[:decl.name_off])
+				tp.params_pos = advance_position(tok.pos, tok.value[:decl.params_off])
 				append(&nodes, tp)
 			} else {
 				append(&nodes, Odin_Span{text = tok.value, pos = tok.pos})

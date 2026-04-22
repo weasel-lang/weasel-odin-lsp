@@ -17,6 +17,14 @@
 	  false  — inside a template body or top-level: Odin_Span is verbatim Odin source
 	  true   — inside element children or Odin_Block children: Odin_Span is HTML text
 	           content and must be emitted as a __weasel_write_raw_string call
+
+	Source map:
+	  While emitting, a cursor tracks (offset, line, col) in the output buffer.
+	  Whenever a fragment of the generated Odin corresponds to a recognisable
+	  byte range in the .weasel source (procedure names, component tag names,
+	  Expr_Node expressions, Odin passthrough, etc.) a Span_Entry is appended
+	  to the Source_Map so downstream tooling can translate coordinates both
+	  ways between the two files.  See source_map.odin for the data model.
 */
 package transpiler
 
@@ -29,13 +37,29 @@ Transpile_Error :: struct {
 	pos:     Position,
 }
 
-// transpile converts a parsed AST into Odin source code. Caller owns the
-// returned string (free with delete(transmute([]u8)source)) and error slice.
+// _Emitter bundles the mutable state threaded through emission: the output
+// builder, the running cursor used to compute odin-side span endpoints, the
+// source map being populated, the error sink, and the same-file template
+// signature table used to validate component calls.
+@(private = "file")
+_Emitter :: struct {
+	sb:    ^strings.Builder,
+	pos:   Position,
+	smap:  ^Source_Map,
+	errs:  ^[dynamic]Transpile_Error,
+	known: map[string]bool,
+}
+
+// transpile converts a parsed AST into Odin source code and an accompanying
+// Source_Map.  Caller owns the returned string (free with
+// delete(transmute([]u8)source)), the map's entries
+// (source_map_destroy(&smap)), and the error slice.
 transpile :: proc(
 	nodes: []Node,
 	allocator := context.allocator,
-) -> (source: string, errs: [dynamic]Transpile_Error) {
-	errs = make([dynamic]Transpile_Error, allocator)
+) -> (source: string, smap: Source_Map, errs: [dynamic]Transpile_Error) {
+	errs         = make([dynamic]Transpile_Error, allocator)
+	smap.entries = make([dynamic]Span_Entry, allocator)
 	sb := strings.builder_make(allocator)
 
 	// Build a map of template proc names to their has_slot status so that
@@ -48,11 +72,67 @@ transpile :: proc(
 		}
 	}
 
-	for node in nodes {
-		_emit_node(&sb, node, &errs, false, known)
+	e := _Emitter{
+		sb    = &sb,
+		pos   = Position{offset = 0, line = 1, col = 1},
+		smap  = &smap,
+		errs  = &errs,
+		known = known,
 	}
+
+	for node in nodes {
+		_emit_node(&e, node, false)
+	}
+
+	_sort_entries(&smap)
 	source = strings.to_string(sb)
 	return
+}
+
+// ---------------------------------------------------------------------------
+// Emitter helpers
+// ---------------------------------------------------------------------------
+
+// _write appends s to the output and advances the cursor.
+@(private = "file")
+_write :: proc(e: ^_Emitter, s: string) {
+	strings.write_string(e.sb, s)
+	e.pos = advance_position(e.pos, s)
+}
+
+// _write_byte appends one byte to the output and advances the cursor.
+@(private = "file")
+_write_byte :: proc(e: ^_Emitter, b: byte) {
+	strings.write_byte(e.sb, b)
+	e.pos.offset += 1
+	if b == '\n' {
+		e.pos.line += 1
+		e.pos.col = 1
+	} else {
+		e.pos.col += 1
+	}
+}
+
+// _write_tracked appends s to the output and records a Span_Entry that maps
+// the emitted range back to [weasel_start, weasel_start + len(s_weasel)) in
+// the Weasel source.  s_weasel is usually equal to s (the fragment is
+// preserved verbatim), but callers may pass a different string when the
+// Weasel source bytes differ from the emitted bytes (e.g. a tag name emitted
+// as an identifier call).
+@(private = "file")
+_write_tracked :: proc(e: ^_Emitter, s: string, weasel_start: Position, s_weasel: string = "") {
+	start := e.pos
+	_write(e, s)
+	wstr := s_weasel if len(s_weasel) > 0 else s
+	append(
+		&e.smap.entries,
+		Span_Entry{
+			odin_start   = start,
+			odin_end     = e.pos,
+			weasel_start = weasel_start,
+			weasel_end   = advance_position(weasel_start, wstr),
+		},
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -75,24 +155,27 @@ _is_void_element :: proc(tag: string) -> bool {
 // String literal content helper
 // ---------------------------------------------------------------------------
 
-// _write_string_literal_content writes s into sb with the minimal escaping
-// needed for it to be valid inside an Odin double-quoted string literal.
+// _write_string_literal_content writes s into the emitter with the minimal
+// escaping needed for it to be valid inside an Odin double-quoted string
+// literal.  No span entries are recorded: the content lives inside a
+// synthetic string literal in the generated Odin and is not a hoverable
+// identifier from the LSP's perspective.
 @(private = "file")
-_write_string_literal_content :: proc(sb: ^strings.Builder, s: string) {
+_write_string_literal_content :: proc(e: ^_Emitter, s: string) {
 	for i := 0; i < len(s); i += 1 {
 		switch s[i] {
 		case '\\':
-			strings.write_string(sb, `\\`)
+			_write(e, `\\`)
 		case '"':
-			strings.write_string(sb, `\"`)
+			_write(e, `\"`)
 		case '\n':
-			strings.write_string(sb, `\n`)
+			_write(e, `\n`)
 		case '\r':
-			strings.write_string(sb, `\r`)
+			_write(e, `\r`)
 		case '\t':
-			strings.write_string(sb, `\t`)
+			_write(e, `\t`)
 		case:
-			strings.write_byte(sb, s[i])
+			_write_byte(e, s[i])
 		}
 	}
 }
@@ -104,110 +187,102 @@ _write_string_literal_content :: proc(sb: ^strings.Builder, s: string) {
 // _emit_node dispatches on node type. in_html controls how Odin_Span nodes
 // are emitted: verbatim when false, as a raw-string write call when true.
 @(private = "file")
-_emit_node :: proc(
-	sb:      ^strings.Builder,
-	node:    Node,
-	errs:    ^[dynamic]Transpile_Error,
-	in_html: bool,
-	known:   map[string]bool,
-) {
+_emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 	switch n in node {
 	case Odin_Span:
 		if in_html {
 			// Text content inside an element: emit as a raw-string write call.
-			strings.write_string(sb, `__weasel_write_raw_string(w, "`)
-			_write_string_literal_content(sb, n.text)
-			strings.write_string(sb, `") or_return`)
-			strings.write_byte(sb, '\n')
+			// The text itself lives inside the emitted string literal, so no
+			// identifier-level span is recorded.
+			_write(e, `__weasel_write_raw_string(w, "`)
+			_write_string_literal_content(e, n.text)
+			_write(e, `") or_return`)
+			_write_byte(e, '\n')
 		} else {
-			strings.write_string(sb, n.text)
+			// Verbatim Odin passthrough: the whole span maps back to the
+			// originating .weasel byte range.
+			_write_tracked(e, n.text, n.pos)
 		}
 	case Expr_Node:
-		strings.write_string(sb, "__weasel_write_escaped_string(w, ")
-		strings.write_string(sb, n.expr)
-		strings.write_string(sb, ") or_return\n")
+		_write(e, "__weasel_write_escaped_string(w, ")
+		// Expr_Node.pos is at the opening '{'; the expression bytes start
+		// one column (and one offset) later.
+		_write_tracked(e, n.expr, _position_after_byte(n.pos))
+		_write(e, ") or_return\n")
 	case Element_Node:
-		_emit_element(sb, n, errs, known)
+		_emit_element(e, n)
 	case Odin_Block:
-		_emit_odin_block(sb, n, errs, known)
+		_emit_odin_block(e, n)
 	case Template_Proc:
-		_emit_template_proc(sb, n, errs, known)
+		_emit_template_proc(e, n)
 	}
 }
 
+// _position_after_byte returns p advanced by a single non-newline byte.
+// Used to step past single-character sigils ({ or <) to reach the payload.
 @(private = "file")
-_emit_template_proc :: proc(
-	sb:    ^strings.Builder,
-	n:     Template_Proc,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
-) {
+_position_after_byte :: proc(p: Position) -> Position {
+	return Position{offset = p.offset + 1, line = p.line, col = p.col + 1}
+}
+
+@(private = "file")
+_emit_template_proc :: proc(e: ^_Emitter, n: Template_Proc) {
 	// name :: proc(w: io.Writer[, user-params][, children callback]) -> io.Error {
-	strings.write_string(sb, n.name)
-	strings.write_string(sb, " :: proc(w: io.Writer")
+	_write_tracked(e, n.name, n.name_pos)
+	_write(e, " :: proc(w: io.Writer")
 	if len(n.params) > 0 {
-		strings.write_string(sb, ", ")
-		strings.write_string(sb, n.params)
+		_write(e, ", ")
+		_write_tracked(e, n.params, n.params_pos)
 	}
 	if n.has_slot {
-		strings.write_string(sb, ", children: proc(w: io.Writer) -> io.Error")
+		_write(e, ", children: proc(w: io.Writer) -> io.Error")
 	}
-	strings.write_string(sb, ") -> io.Error {")
+	_write(e, ") -> io.Error {")
 
 	// Template body is Odin context: Odin_Span nodes are verbatim source.
 	for node in n.body {
-		_emit_node(sb, node, errs, false, known)
+		_emit_node(e, node, false)
 	}
 
-	strings.write_string(sb, "}\n")
+	_write(e, "}\n")
 }
 
 @(private = "file")
-_emit_element :: proc(
-	sb:    ^strings.Builder,
-	n:     Element_Node,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
-) {
+_emit_element :: proc(e: ^_Emitter, n: Element_Node) {
 	// <slot /> invokes the caller-supplied children callback.
 	if n.tag == "slot" {
-		strings.write_string(sb, "children(w) or_return\n")
+		_write(e, "children(w) or_return\n")
 		return
 	}
 	switch n.kind {
 	case .Raw:
-		_emit_raw_element(sb, n, errs, known)
+		_emit_raw_element(e, n)
 	case .Component:
-		_emit_component(sb, n, errs, known)
+		_emit_component(e, n)
 	}
 }
 
 @(private = "file")
-_emit_raw_element :: proc(
-	sb:    ^strings.Builder,
-	n:     Element_Node,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
-) {
+_emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 	// HTML5 void elements are self-closing: emit a single combined string.
 	if _is_void_element(n.tag) {
-		_emit_open_tag(sb, n.tag, n.attrs, true)
+		_emit_open_tag(e, n.tag, n.attrs, true)
 		return
 	}
 
 	// Open tag (with attributes).
-	_emit_open_tag(sb, n.tag, n.attrs, false)
+	_emit_open_tag(e, n.tag, n.attrs, false)
 
 	// Children are HTML context: Odin_Span nodes are text content.
 	for child in n.children {
-		_emit_node(sb, child, errs, true, known)
+		_emit_node(e, child, true)
 	}
 
 	// Close tag.
-	strings.write_string(sb, `__weasel_write_raw_string(w, "</`)
-	strings.write_string(sb, n.tag)
-	strings.write_string(sb, `>") or_return`)
-	strings.write_byte(sb, '\n')
+	_write(e, `__weasel_write_raw_string(w, "</`)
+	_write(e, n.tag)
+	_write(e, `>") or_return`)
+	_write_byte(e, '\n')
 }
 
 // _emit_open_tag emits one or more write calls that together produce the element
@@ -217,15 +292,10 @@ _emit_raw_element :: proc(
 // is flushed, then the expression is emitted via fmt.wprint, then accumulation
 // continues from the closing quote of the attribute value.
 @(private = "file")
-_emit_open_tag :: proc(
-	sb:         ^strings.Builder,
-	tag:        string,
-	attrs:      [dynamic]Attr,
-	self_close: bool,
-) {
-	// pending accumulates raw HTML text for the open tag.  It is flushed to sb
-	// as a __weasel_write_raw_string call whenever a dynamic attribute is
-	// encountered (or at the very end).
+_emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_close: bool) {
+	// pending accumulates raw HTML text for the open tag.  It is flushed to
+	// the emitter as a __weasel_write_raw_string call whenever a dynamic
+	// attribute is encountered (or at the very end).
 	pending := strings.builder_make()
 	defer strings.builder_destroy(&pending)
 
@@ -239,10 +309,13 @@ _emit_open_tag :: proc(
 			strings.write_byte(&pending, ' ')
 			strings.write_string(&pending, attr.name)
 			strings.write_string(&pending, `="`)
-			_flush_pending(sb, &pending)
-			strings.write_string(sb, "fmt.wprint(w, ")
-			strings.write_string(sb, attr.expr)
-			strings.write_string(sb, ")\n")
+			_flush_pending(e, &pending)
+			_write(e, "fmt.wprint(w, ")
+			// attr.pos points at the attribute name; the expression is an
+			// Odin identifier emitted verbatim, so we track it with the
+			// best-available Weasel origin (the attribute as a whole).
+			_write_tracked(e, attr.expr, attr.pos)
+			_write(e, ")\n")
 			// Pending resumes from the closing quote of the attribute value.
 			strings.write_byte(&pending, '"')
 		} else {
@@ -263,41 +336,49 @@ _emit_open_tag :: proc(
 	} else {
 		strings.write_byte(&pending, '>')
 	}
-	_flush_pending(sb, &pending)
+	_flush_pending(e, &pending)
 }
 
 // _flush_pending emits the current content of pending as a
 // __weasel_write_raw_string call and resets the builder.  No-ops when pending
 // is empty.
 @(private = "file")
-_flush_pending :: proc(sb: ^strings.Builder, pending: ^strings.Builder) {
+_flush_pending :: proc(e: ^_Emitter, pending: ^strings.Builder) {
 	content := strings.to_string(pending^)
 	if len(content) == 0 {return}
-	strings.write_string(sb, `__weasel_write_raw_string(w, "`)
-	_write_string_literal_content(sb, content)
-	strings.write_string(sb, `") or_return`)
-	strings.write_byte(sb, '\n')
+	_write(e, `__weasel_write_raw_string(w, "`)
+	_write_string_literal_content(e, content)
+	_write(e, `") or_return`)
+	_write_byte(e, '\n')
 	strings.builder_reset(pending)
 }
 
-// _write_props_name appends the component's Props struct name to sb.
+// _write_props_name appends the component's Props struct name to the emitter
+// and records a span covering it that maps back to the original tag.
 // "card" → "Card_Props", "ui.card" → "Card_Props" (last segment, first letter uppercased).
 @(private = "file")
-_write_props_name :: proc(sb: ^strings.Builder, tag: string) {
+_write_props_name :: proc(e: ^_Emitter, tag: string, tag_pos: Position) {
+	// Derive "<Local>_Props" from the last dotted segment of the tag.
 	local := tag
+	local_pos := tag_pos
 	if dot := strings.last_index(tag, "."); dot >= 0 {
 		local = tag[dot + 1:]
+		local_pos = advance_position(tag_pos, tag[:dot + 1])
 	}
+
+	sb := strings.builder_make()
+	defer strings.builder_destroy(&sb)
 	if len(local) > 0 {
 		c := local[0]
 		if c >= 'a' && c <= 'z' {
-			strings.write_byte(sb, c - ('a' - 'A'))
+			strings.write_byte(&sb, c - ('a' - 'A'))
 		} else {
-			strings.write_byte(sb, c)
+			strings.write_byte(&sb, c)
 		}
-		strings.write_string(sb, local[1:])
+		strings.write_string(&sb, local[1:])
 	}
-	strings.write_string(sb, "_Props")
+	strings.write_string(&sb, "_Props")
+	_write_tracked(e, strings.to_string(sb), local_pos, local)
 }
 
 // _emit_component emits a template proc call for a Component-kind Element_Node.
@@ -310,19 +391,14 @@ _write_props_name :: proc(sb: ^strings.Builder, tag: string) {
 //
 // Passing children to a template known (in the same file) to have no <slot /> is a transpile error.
 @(private = "file")
-_emit_component :: proc(
-	sb:    ^strings.Builder,
-	n:     Element_Node,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
-) {
+_emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 	has_children := len(n.children) > 0
 
 	// Validate children against same-file template definitions.
 	if has_children {
-		if has_slot, is_known := known[n.tag]; is_known && !has_slot {
+		if has_slot, is_known := e.known[n.tag]; is_known && !has_slot {
 			append(
-				errs,
+				e.errs,
 				Transpile_Error{
 					message = fmt.aprintf(
 						"component '%s' has no <slot />, cannot pass children",
@@ -335,63 +411,62 @@ _emit_component :: proc(
 		}
 	}
 
-	// Emit the call name (verbatim; may be dotted e.g. "ui.card").
-	strings.write_string(sb, n.tag)
-	strings.write_string(sb, "(w")
+	// Emit the call name verbatim.  n.pos points at the '<'; the tag name
+	// bytes start one column later in the .weasel source.
+	tag_pos := _position_after_byte(n.pos)
+	_write_tracked(e, n.tag, tag_pos)
+	_write(e, "(w")
 
 	// Props struct argument (only when attributes are present).
 	if len(n.attrs) > 0 {
-		strings.write_string(sb, ", &")
-		_write_props_name(sb, n.tag)
-		strings.write_byte(sb, '{')
+		_write(e, ", &")
+		_write_props_name(e, n.tag, tag_pos)
+		_write_byte(e, '{')
 		for i in 0 ..< len(n.attrs) {
 			if i > 0 {
-				strings.write_string(sb, ", ")
+				_write(e, ", ")
 			}
 			attr := n.attrs[i]
-			strings.write_string(sb, attr.name)
-			strings.write_string(sb, " = ")
+			_write_tracked(e, attr.name, attr.pos)
+			_write(e, " = ")
 			if attr.is_dynamic {
-				strings.write_string(sb, attr.expr)
+				_write_tracked(e, attr.expr, attr.pos)
 			} else {
-				strings.write_byte(sb, '"')
-				_write_string_literal_content(sb, attr.value)
-				strings.write_byte(sb, '"')
+				_write_byte(e, '"')
+				_write_string_literal_content(e, attr.value)
+				_write_byte(e, '"')
 			}
 		}
-		strings.write_byte(sb, '}')
+		_write_byte(e, '}')
 	}
 
 	// Anonymous proc callback (only when child nodes are present).
 	if has_children {
-		strings.write_string(sb, ", proc(w: io.Writer) -> io.Error {\n")
+		_write(e, ", proc(w: io.Writer) -> io.Error {\n")
 		for child in n.children {
-			_emit_node(sb, child, errs, true, known)
+			_emit_node(e, child, true)
 		}
-		strings.write_string(sb, "return nil\n}")
+		_write(e, "return nil\n}")
 	}
 
-	strings.write_string(sb, ") or_return\n")
+	_write(e, ") or_return\n")
 }
 
 @(private = "file")
-_emit_odin_block :: proc(
-	sb:    ^strings.Builder,
-	n:     Odin_Block,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
-) {
-	strings.write_string(sb, n.head)
-	strings.write_byte(sb, '{')
-	strings.write_byte(sb, '\n')
+_emit_odin_block :: proc(e: ^_Emitter, n: Odin_Block) {
+	// Odin_Block.pos is at the opening '{' of the wrapping Inline_Expr; the
+	// head bytes (e.g. "for x in items ") begin one byte later.
+	_write_tracked(e, n.head, _position_after_byte(n.pos))
+	_write_byte(e, '{')
+	_write_byte(e, '\n')
 	// Odin_Block children are in Odin context: Odin_Span nodes (e.g. case labels,
 	// comments) are emitted verbatim.  Element_Node children emit their own HTML
 	// write calls regardless of the in_html flag.
 	for child in n.children {
-		_emit_node(sb, child, errs, false, known)
+		_emit_node(e, child, false)
 	}
 	if len(n.tail) > 0 {
-		strings.write_string(sb, n.tail)
-		strings.write_byte(sb, '\n')
+		_write(e, n.tail)
+		_write_byte(e, '\n')
 	}
 }

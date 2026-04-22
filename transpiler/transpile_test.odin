@@ -5,6 +5,8 @@ import "core:strings"
 
 // _spt scans, parses, and transpiles src in one call. Caller owns both
 // returned values: free the string with delete(transmute([]u8)src).
+// The source map is discarded by this helper; tests that need it use
+// _spt_with_map in source_map_test.odin.
 @(private = "file")
 _spt :: proc(src: string) -> (string, [dynamic]Transpile_Error) {
 	tokens, scan_errs := scan(src)
@@ -13,7 +15,9 @@ _spt :: proc(src: string) -> (string, [dynamic]Transpile_Error) {
 	nodes, parse_errs := parse(tokens[:])
 	defer delete(parse_errs)
 	defer delete(nodes)
-	return transpile(nodes[:])
+	source, smap, errs := transpile(nodes[:])
+	source_map_destroy(&smap)
+	return source, errs
 }
 
 // ---------------------------------------------------------------------------

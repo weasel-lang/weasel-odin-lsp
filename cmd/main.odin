@@ -171,7 +171,10 @@ _generate_file :: proc(in_path, out_path: string) -> bool {
 	}
 
 	// --- Transpile ---
-	source, transpile_errs := transpiler.transpile(nodes[:])
+	// The source map is not used by the CLI generator; it exists for the
+	// weasel-lsp proxy.  Allocations go through the same arena as the rest
+	// of this procedure, so no explicit cleanup is required.
+	source, _, transpile_errs := transpiler.transpile(nodes[:])
 
 	if len(transpile_errs) > 0 {
 		for e in transpile_errs {
