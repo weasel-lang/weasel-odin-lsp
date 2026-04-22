@@ -68,10 +68,13 @@ Implement the core transpiler: walk the AST and emit valid Odin source. This tas
 
 - [ ] `template` keyword in proc declaration is replaced with `proc`
 - [ ] `w: io.Writer` is inserted as the first parameter in every template proc signature
-- [ ] Raw HTML elements (not in registry) emit `__weasel_write_raw_string(w, "<tag>") or_return` for open and `__weasel_write_raw_string(w, "</tag>") or_return` for close
+- [ ] Every generated template proc has `-> io.Error` as its return type
+- [ ] If a template body contains `<slot />`, a `children: proc(w: io.Writer) -> io.Error` parameter is appended to the generated proc signature
+- [ ] `<slot />` in the template body emits `children(w) or_return`
+- [ ] Raw HTML elements emit `__weasel_write_raw_string(w, "<tag>") or_return` for open and `__weasel_write_raw_string(w, "</tag>") or_return` for close
 - [ ] Self-closing raw elements emit a single combined open+close string (e.g. `<br/>`)
 - [ ] `OdinSpan` nodes are emitted verbatim, preserving whitespace and formatting
-- [ ] Inline expressions `{expr}` emit the inner expression verbatim (no wrapper)
+- [ ] Inline expressions `{expr}` emit `__weasel_write_escaped_string(w, expr) or_return` (HTML-escaped by default)
 
 ## Test Cases **[CONDITIONAL: Testing Task]**
 

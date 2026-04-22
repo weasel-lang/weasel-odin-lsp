@@ -28,7 +28,7 @@ initiative_id: WEASEL-I-0001
 
 ## Objective
 
-Extend the transpiler to emit component template calls for Weasel elements that resolve to known template procs. When the component has nested children, wrap them in an anonymous `proc(w: io.Writer)` callback as per WEASEL-A-0001.
+Extend the transpiler to emit component template calls for Weasel elements that resolve to template procs via the heuristic in WEASEL-A-0002. When the component has nested children, wrap them in an anonymous `proc(w: io.Writer) -> io.Error` callback as per WEASEL-A-0001.
 
 ## Backlog Item Details **[CONDITIONAL: Backlog Item]**
 
@@ -66,12 +66,14 @@ Extend the transpiler to emit component template calls for Weasel elements that 
 
 ## Acceptance Criteria
 
-- [ ] Elements whose tag name is in the template proc registry are emitted as proc calls: `tag_name(w, props)`
-- [ ] Dotted names (`ui.card`) are emitted as qualified calls: `ui.card(w, props)`
+- [ ] Elements resolved as template procs (via the WEASEL-A-0002 heuristic) are emitted as proc calls: `tag_name(w, &Tag_Props{...}) or_return`
+- [ ] Dotted names (`ui.card`) are emitted as qualified calls: `ui.card(w, &Card_Props{...}) or_return`
+- [ ] Attributes on component tags map to struct fields in a composite literal passed as a pointer: `title="Task"` → `&Card_Props{title = "Task"}`
 - [ ] Self-closing component elements (`<tag />`) emit a call with no children argument
-- [ ] Component elements with nested children emit an anonymous proc as the last argument: `tag(w, props, proc(w: io.Writer) { ... })`
+- [ ] Component elements with nested children emit an anonymous proc as the last argument: `tag(w, &Tag_Props{...}, proc(w: io.Writer) -> io.Error { ... }) or_return`
 - [ ] The nested children inside the anonymous proc are themselves fully transpiled (recursion)
-- [ ] Blocked by WEASEL-T-0002 (registry) and WEASEL-T-0004 (core transpiler)
+- [ ] Passing child content to a component that has no `<slot />` in its definition is a transpile-time error
+- [ ] Blocked by WEASEL-T-0004 (core transpiler)
 
 ## Test Cases **[CONDITIONAL: Testing Task]**
 
@@ -126,10 +128,10 @@ Extend the transpiler to emit component template calls for Weasel elements that 
 {Keep for technical tasks, delete for non-technical. Technical details, approach, or important considerations}
 
 ### Technical Approach
-In the element emitter, check the registry: if the tag is a known template, emit a proc call instead of raw string writes. If the element has children, open an anonymous proc literal `proc(w: io.Writer) {`, recursively emit children, then close `}` and pass it as the final argument.
+In the element emitter, apply the three-rule heuristic from WEASEL-A-0002: if the tag resolves to a template proc, emit a proc call instead of raw string writes. Attributes are collected and emitted as a `&Tag_Props{field = value, ...}` composite literal. If the element has children, open an anonymous proc literal `proc(w: io.Writer) -> io.Error {`, recursively emit children, then close with `return nil\n}` and pass it as the final argument, followed by `or_return`.
 
 ### Dependencies
-WEASEL-T-0002 (registry), WEASEL-T-0004 (core transpiler)
+WEASEL-T-0004 (core transpiler)
 
 ### Risk Considerations
 Anonymous proc literals in Odin capture outer variables by reference. If the component is called inside a loop, the loop variable is captured correctly — but the transpiler must ensure the emitted `w` parameter name in the inner proc shadows the outer `w` without conflict.

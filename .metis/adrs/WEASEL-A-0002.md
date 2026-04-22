@@ -5,7 +5,7 @@ title: "Element resolution: heuristic over template proc registry"
 number: 1
 short_code: "WEASEL-A-0002"
 created_at: 2026-04-21T22:19:17.022185+00:00
-updated_at: 2026-04-21T22:19:17.022185+00:00
+updated_at: 2026-04-22T09:24:01.693851+00:00
 decision_date: 
 decision_maker: 
 parent: 
@@ -13,7 +13,7 @@ archived: false
 
 tags:
   - "#adr"
-  - "#phase/draft"
+  - "#phase/decided"
 
 
 exit_criteria_met: false
