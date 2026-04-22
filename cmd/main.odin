@@ -13,6 +13,7 @@ package main
 
 import "core:flags"
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -129,20 +130,28 @@ _is_up_to_date :: proc(in_path, out_path: string) -> bool {
 
 // _generate_file runs the full pipeline on in_path and writes the result to out_path.
 // Diagnostic messages are printed to stderr.  Returns true on success.
+//
+// All intermediate allocations (tokens, AST nodes, error messages, transpiler
+// scratch strings) are made from a per-file arena.  The arena is freed on
+// return, so no individual cleanup of nested structures is required.
 _generate_file :: proc(in_path, out_path: string) -> bool {
+	// --- Arena setup ---
+	backing := make([]byte, 4 * mem.Megabyte)
+	defer delete(backing)
+	arena: mem.Arena
+	mem.arena_init(&arena, backing)
+	context.allocator = mem.arena_allocator(&arena)
+
 	// --- Read source ---
 	data, read_err := os.read_entire_file(in_path, context.allocator)
 	if read_err != nil {
 		fmt.eprintfln("weasel: cannot read '%s': %v", in_path, read_err)
 		return false
 	}
-	defer delete(data)
 	src := string(data)
 
 	// --- Lex ---
 	tokens, scan_errs := transpiler.scan(src)
-	defer delete(tokens)
-	defer delete(scan_errs)
 
 	if len(scan_errs) > 0 {
 		for e in scan_errs {
@@ -153,8 +162,6 @@ _generate_file :: proc(in_path, out_path: string) -> bool {
 
 	// --- Parse ---
 	nodes, parse_errs := transpiler.parse(tokens[:])
-	defer delete(nodes)
-	defer delete(parse_errs)
 
 	if len(parse_errs) > 0 {
 		for e in parse_errs {
@@ -165,8 +172,6 @@ _generate_file :: proc(in_path, out_path: string) -> bool {
 
 	// --- Transpile ---
 	source, transpile_errs := transpiler.transpile(nodes[:])
-	defer delete(transpile_errs)
-	defer delete(transmute([]u8)source)
 
 	if len(transpile_errs) > 0 {
 		for e in transpile_errs {
