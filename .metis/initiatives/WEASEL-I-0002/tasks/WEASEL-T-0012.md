@@ -64,4 +64,49 @@ LSP framing is unforgiving — a single off-by-one in `Content-Length` handling 
 
 ## Status Updates
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+Implemented the `weasel-lsp` proxy skeleton plus the T-0011 refactor that it depends on. The proxy builds, handshakes cleanly with real `ols`, and exits non-zero with an explanatory stderr message when `ols` dies unexpectedly.
+
+**Refactor carried from T-0011 (moved to LSP layer)**
+
+- `transpiler/source_map.odin` — dropped the `weasel_sorted` field from `Source_Map`, simplified `_sort_entries` to only sort `entries` by `odin_start.offset`, removed `odin_to_weasel`/`weasel_to_odin`/`_find_span`/`_interpolate`, and updated `source_map_destroy` to only free `entries`. The CLI (`weasel generate`) no longer pays to build a reverse index it never reads.
+- `lsp/source_map_index.odin` (new) — introduced `Translator`, built once per document. Borrows `sm.entries` as `odin_sorted` and owns a `weasel_sorted` copy. `translator_make`/`translator_destroy` is the public surface. `odin_to_weasel` and `weasel_to_odin` now take a `^Translator` instead of a `^Source_Map`.
+- `lsp/source_map_translate_test.odin` (new, moved from `transpiler/`) — 17 tests rewritten to use the `Translator` wrapper and `transpiler.Source_Map` directly. The test helper sorts synthetic entries in place rather than reaching into a transpiler-private sort routine.
+
+**Framing layer (`lsp/framing.odin`)**
+
+- `Frame_Error` enum: `None | EOF | Unexpected_EOF | Invalid_Header | Oversize | IO`.
+- `read_message(r: io.Reader)` — byte-at-a-time header read terminated by CRLFCRLF or LFLF (lenient on the read side), parses `Content-Length` case-insensitively, ignores all other headers, reads exactly that many body bytes. Clean EOF before any header byte surfaces as `.EOF`; EOF mid-frame surfaces as `.Unexpected_EOF`. Caps: 8 KiB headers, 64 MiB body.
+- `write_message(w: io.Writer, body)` — emits `Content-Length: N\r\n\r\n<body>` per spec.
+- `lsp/framing_test.odin` (new) — 16 tests covering: basic round-trip, byte-at-a-time straddled reads via a `_Chunk_Reader` helper, back-to-back frames on one reader, extra headers, LF-only delimiters, zero body, clean EOF, truncated headers, truncated body, missing `Content-Length`, garbage header, non-numeric length, case-insensitive match.
+
+**Proxy binary (`cmd/weasel-lsp/main.odin`)**
+
+- Args: `--ols <path>` (default `ols` on PATH); `-h`/`--help`.
+- Creates two pipes, spawns `ols` via `os.process_start` with them wired to its stdin/stdout; inherits this process's stderr so `ols` logs are still visible.
+- Two I/O threads: `editor->ols` and `ols->editor`. Each is a `Forwarder` that reads framed messages and writes them verbatim. Using the framing layer (not raw byte forwarding) catches protocol errors on the boundary and mirrors the shape T-0014 will need.
+- When the editor closes its stdin, the `editor->ols` forwarder's defer closes `ols_stdin_w`, propagating EOF to `ols` so it can exit cleanly after the LSP `exit` notification.
+- Main thread blocks on `os.process_wait`. Non-zero exit code → `"weasel-lsp: ols exited unexpectedly with code N"` on stderr, then `os.exit(N)`. Zero exit → `os.exit(0)`.
+
+**End-to-end validation**
+
+- Unit: `odin test transpiler/` 107/107 pass. `odin test lsp/` 33/33 pass (17 translator + 16 framing).
+- Integration with a Python fake-ols echo server: two request/response cycles relay correctly, proxy exits 0 after stdin close.
+- Integration with a Python fake-ols that exits 42 immediately: proxy logs `ols exited unexpectedly with code 42` and exits 42.
+- Missing `ols` binary: `weasel-lsp: cannot spawn '<path>': Not_Exist`, exit 1.
+- Real `ols` (`/Users/greger/.local/bin/ols`) through the proxy: full `initialize`/`initialized`/`shutdown`/`exit` handshake — both responses (ids 1 and 2) arrive, proxy exits 0.
+
+**Acceptance criteria**
+
+- [x] New `weasel-lsp` binary builds and runs — Odin, under `cmd/weasel-lsp/`.
+- [x] Reads framed LSP messages from stdin / writes framed responses to stdout.
+- [x] Spawns `ols` as a child with pipes wired to stdin/stdout.
+- [x] Every editor message forwarded verbatim to `ols`; every `ols` message forwarded back verbatim (bodies are opaque bytes at this stage).
+- [x] `initialize` / `initialized` / `shutdown` / `exit` handshake completes cleanly against real `ols` through the proxy.
+- [x] Unexpected `ols` exit logs the code and terminates non-zero rather than hanging.
+
+**Notes for T-0013 / T-0014**
+
+- The `Translator` lives alongside the `Source_Map` and generated Odin string; T-0013 will keep one per open document. `translator_make` takes a `^transpiler.Source_Map` and borrows its `entries` slice, so the `Source_Map` must outlive the `Translator`.
+- The proxy uses `lsp.read_message` / `lsp.write_message` at the frame layer, so T-0014 just needs to replace `write_message(dst, body)` with a "parse → rewrite positions → re-serialize → write" step in the appropriate direction.

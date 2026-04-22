@@ -1,9 +1,0 @@
-# Metis Ralph Loop State
-# Progress is logged to the task document via MCP
-short_code: "WEASEL-T-0012"
-project_path: "/Users/greger/workspace/odin/weasel/.metis"
-mode: task
-iteration: 1
-max_iterations: 0
-completion_promise: "TASK COMPLETE"
-started_at: "2026-04-22T18:51:52Z"
