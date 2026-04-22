@@ -1,0 +1,376 @@
+package transpiler
+
+import "core:testing"
+
+// _make_map constructs a Source_Map from a literal slice of entries, runs
+// the normal finalisation step so both sort orders are populated, and
+// returns the map ready for translation queries.  Callers must pair it
+// with source_map_destroy.
+@(private = "file")
+_make_map :: proc(entries: []Span_Entry) -> Source_Map {
+	m: Source_Map
+	m.entries = make([dynamic]Span_Entry, 0, len(entries))
+	for e in entries {append(&m.entries, e)}
+	_sort_entries(&m)
+	return m
+}
+
+// ---------------------------------------------------------------------------
+// odin_to_weasel
+// ---------------------------------------------------------------------------
+
+// Exact span start — position sits on the very first byte of the span.
+@(test)
+test_translate_odin_to_weasel_exact_start :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 10, line = 2, col = 1},
+			odin_end     = {offset = 15, line = 2, col = 6},
+			weasel_start = {offset = 0,  line = 1, col = 1},
+			weasel_end   = {offset = 5,  line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	got, ok := odin_to_weasel(&m, Position{offset = 10, line = 2, col = 1})
+	testing.expect(t, ok, "exact start should be inside the span")
+	testing.expect_value(t, got, Position{offset = 0, line = 1, col = 1})
+}
+
+// Exact span end — half-open convention: end.offset is NOT inside the span.
+// With no adjacent span, the translation returns false.
+@(test)
+test_translate_odin_to_weasel_exact_end_no_successor :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := odin_to_weasel(&m, Position{offset = 5, line = 1, col = 6})
+	testing.expect(t, !ok, "exact end with no successor must return false")
+}
+
+// Exact span end — when an adjacent span starts at the same offset, the
+// position resolves to the successor span.
+@(test)
+test_translate_odin_to_weasel_exact_end_has_successor :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 100, line = 10, col = 1},
+			weasel_end   = {offset = 105, line = 10, col = 6},
+		},
+		{
+			odin_start   = {offset = 5,  line = 1, col = 6},
+			odin_end     = {offset = 10, line = 1, col = 11},
+			weasel_start = {offset = 200, line = 20, col = 1},
+			weasel_end   = {offset = 205, line = 20, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	got, ok := odin_to_weasel(&m, Position{offset = 5, line = 1, col = 6})
+	testing.expect(t, ok, "offset at adjacent boundary should land in successor")
+	testing.expect_value(t, got, Position{offset = 200, line = 20, col = 1})
+}
+
+// Interior of span — a cursor mid-identifier should map to the
+// corresponding mid-identifier byte in the other file (column math).
+@(test)
+test_translate_odin_to_weasel_interior :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 20, line = 3, col = 5},
+			odin_end     = {offset = 25, line = 3, col = 10}, // "greet"
+			weasel_start = {offset = 0,  line = 1, col = 1},
+			weasel_end   = {offset = 5,  line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	// Middle of "greet" in Odin — offset 22, col 7 — should map to offset 2, col 3 in Weasel.
+	got, ok := odin_to_weasel(&m, Position{offset = 22, line = 3, col = 7})
+	testing.expect(t, ok, "interior of span should be inside")
+	testing.expect_value(t, got, Position{offset = 2, line = 1, col = 3})
+}
+
+// Between spans — a cursor that falls into a gap (generated scaffolding
+// like ` :: proc(`) has no Weasel origin and must return false.
+@(test)
+test_translate_odin_to_weasel_between :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+		{
+			odin_start   = {offset = 20, line = 1, col = 21},
+			odin_end     = {offset = 30, line = 1, col = 31},
+			weasel_start = {offset = 10, line = 2, col = 1},
+			weasel_end   = {offset = 20, line = 2, col = 11},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := odin_to_weasel(&m, Position{offset = 12, line = 1, col = 13})
+	testing.expect(t, !ok, "between spans must return false")
+}
+
+// Before first span.
+@(test)
+test_translate_odin_to_weasel_before_first :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 10, line = 1, col = 11},
+			odin_end     = {offset = 15, line = 1, col = 16},
+			weasel_start = {offset = 0,  line = 1, col = 1},
+			weasel_end   = {offset = 5,  line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := odin_to_weasel(&m, Position{offset = 5, line = 1, col = 6})
+	testing.expect(t, !ok, "offset before first span must return false")
+}
+
+// After last span.
+@(test)
+test_translate_odin_to_weasel_after_last :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := odin_to_weasel(&m, Position{offset = 100, line = 50, col = 1})
+	testing.expect(t, !ok, "offset after last span must return false")
+}
+
+// Empty map — any lookup returns false.
+@(test)
+test_translate_odin_to_weasel_empty_map :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{})
+	defer source_map_destroy(&m)
+
+	_, ok := odin_to_weasel(&m, Position{offset = 0, line = 1, col = 1})
+	testing.expect(t, !ok, "lookup on empty map must return false")
+}
+
+// Multi-line passthrough — interior position with a line delta.
+@(test)
+test_translate_odin_to_weasel_multiline_passthrough :: proc(t: ^testing.T) {
+	// A passthrough span whose text runs across two lines: byte layout is
+	// identical on both sides, so line/col deltas carry over unchanged.
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 8, line = 2, col = 1},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 8, line = 2, col = 1},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	// Cursor on the second line of the span.
+	got, ok := odin_to_weasel(&m, Position{offset = 6, line = 2, col = 3})
+	testing.expect(t, ok, "multi-line interior should be inside")
+	testing.expect_value(t, got, Position{offset = 6, line = 2, col = 3})
+}
+
+// ---------------------------------------------------------------------------
+// weasel_to_odin
+// ---------------------------------------------------------------------------
+
+// Exact span start on the Weasel side.
+@(test)
+test_translate_weasel_to_odin_exact_start :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 10, line = 2, col = 1},
+			odin_end     = {offset = 15, line = 2, col = 6},
+			weasel_start = {offset = 0,  line = 1, col = 1},
+			weasel_end   = {offset = 5,  line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	got, ok := weasel_to_odin(&m, Position{offset = 0, line = 1, col = 1})
+	testing.expect(t, ok, "exact Weasel start should be inside the span")
+	testing.expect_value(t, got, Position{offset = 10, line = 2, col = 1})
+}
+
+// Exact span end — half-open, no adjacent span → false.
+@(test)
+test_translate_weasel_to_odin_exact_end_no_successor :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := weasel_to_odin(&m, Position{offset = 5, line = 1, col = 6})
+	testing.expect(t, !ok, "exact Weasel end with no successor must return false")
+}
+
+// Interior — mid-identifier on the Weasel side maps to the mid-identifier
+// Odin position even when the Odin identifier is a different length.
+@(test)
+test_translate_weasel_to_odin_interior :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			// Odin-side "Card_Props" at offset 100, col 11 — length 10.
+			odin_start   = {offset = 100, line = 5, col = 11},
+			odin_end     = {offset = 110, line = 5, col = 21},
+			// Weasel-side "card" at offset 1, col 2 — length 4.
+			weasel_start = {offset = 1, line = 1, col = 2},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	got, ok := weasel_to_odin(&m, Position{offset = 3, line = 1, col = 4})
+	testing.expect(t, ok, "interior of Weasel span should be inside")
+	// delta_offset = 2, delta_col = 2 → Odin {102, 5, 13}.
+	testing.expect_value(t, got, Position{offset = 102, line = 5, col = 13})
+}
+
+// Between spans — a Weasel offset inside a region with no span (e.g. a
+// comment or whitespace region that was not emitted) returns false.
+@(test)
+test_translate_weasel_to_odin_between :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+		{
+			odin_start   = {offset = 5,  line = 1, col = 6},
+			odin_end     = {offset = 10, line = 1, col = 11},
+			weasel_start = {offset = 10, line = 2, col = 1},
+			weasel_end   = {offset = 15, line = 2, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := weasel_to_odin(&m, Position{offset = 7, line = 1, col = 8})
+	testing.expect(t, !ok, "Weasel offset in a gap must return false")
+}
+
+// Before first span on Weasel side.
+@(test)
+test_translate_weasel_to_odin_before_first :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0,  line = 1, col = 1},
+			odin_end     = {offset = 5,  line = 1, col = 6},
+			weasel_start = {offset = 10, line = 1, col = 11},
+			weasel_end   = {offset = 15, line = 1, col = 16},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := weasel_to_odin(&m, Position{offset = 5, line = 1, col = 6})
+	testing.expect(t, !ok, "Weasel offset before first span must return false")
+}
+
+// After last span on Weasel side.
+@(test)
+test_translate_weasel_to_odin_after_last :: proc(t: ^testing.T) {
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 0, line = 1, col = 1},
+			odin_end     = {offset = 5, line = 1, col = 6},
+			weasel_start = {offset = 0, line = 1, col = 1},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	_, ok := weasel_to_odin(&m, Position{offset = 200, line = 100, col = 1})
+	testing.expect(t, !ok, "Weasel offset after last span must return false")
+}
+
+// Weasel → Odin where Odin spans share the same Weasel origin — the
+// search must land on a covering span, whichever it is.
+@(test)
+test_translate_weasel_to_odin_shared_weasel_origin :: proc(t: ^testing.T) {
+	// Both spans map the Weasel range [1,5) "card" to different Odin ranges
+	// (e.g. the raw tag name and the derived Card_Props identifier).  A
+	// query at Weasel offset 2 must produce a position inside one of them.
+	m := _make_map([]Span_Entry{
+		{
+			odin_start   = {offset = 50,  line = 3, col = 1},
+			odin_end     = {offset = 54,  line = 3, col = 5},
+			weasel_start = {offset = 1, line = 1, col = 2},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+		{
+			odin_start   = {offset = 100, line = 6, col = 1},
+			odin_end     = {offset = 110, line = 6, col = 11},
+			weasel_start = {offset = 1, line = 1, col = 2},
+			weasel_end   = {offset = 5, line = 1, col = 6},
+		},
+	})
+	defer source_map_destroy(&m)
+
+	got, ok := weasel_to_odin(&m, Position{offset = 2, line = 1, col = 3})
+	testing.expect(t, ok, "Weasel offset covered by both spans should succeed")
+	// The returned Odin offset must land inside either covering span.
+	inside_a := got.offset >= 50 && got.offset < 54
+	inside_b := got.offset >= 100 && got.offset < 110
+	testing.expect(t, inside_a || inside_b, "result must lie inside a covering span")
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end: round-trip via transpile()
+// ---------------------------------------------------------------------------
+
+@(test)
+test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
+	// Use a real transpile to build the map, then verify odin_to_weasel
+	// picks up the "greet" span start and inverse weasel_to_odin returns
+	// the Odin start.
+	src := "greet :: template() {\n}"
+	tokens, scan_errs := scan(src)
+	defer delete(tokens)
+	defer delete(scan_errs)
+	nodes, parse_errs := parse(tokens[:])
+	defer delete(nodes)
+	defer delete(parse_errs)
+	out, smap, errs := transpile(nodes[:])
+	defer {
+		delete(transmute([]u8)out)
+		source_map_destroy(&smap)
+		delete(errs)
+	}
+
+	testing.expect_value(t, len(errs), 0)
+
+	// "greet" appears at Weasel offset 0 and at Odin offset 0 (the proc
+	// name is the first byte of the output).
+	odin_pos, ok1 := weasel_to_odin(&smap, Position{offset = 0, line = 1, col = 1})
+	testing.expect(t, ok1, "weasel start of 'greet' should resolve")
+	testing.expect_value(t, odin_pos.offset, 0)
+
+	weasel_pos, ok2 := odin_to_weasel(&smap, odin_pos)
+	testing.expect(t, ok2, "odin start of 'greet' should resolve back")
+	testing.expect_value(t, weasel_pos, Position{offset = 0, line = 1, col = 1})
+}

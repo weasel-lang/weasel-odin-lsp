@@ -4,14 +4,14 @@ level: task
 title: "Source map data structure and transpiler emission"
 short_code: "WEASEL-T-0010"
 created_at: 2026-04-22T17:54:33.388387+00:00
-updated_at: 2026-04-22T18:14:55.480346+00:00
+updated_at: 2026-04-22T18:45:22.601971+00:00
 parent: WEASEL-I-0002
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,8 @@ initiative_id: WEASEL-I-0002
 ## Objective
 
 Introduce a `Source_Map` data structure to the transpiler and populate it during code generation so every position-bearing token in the generated Odin output carries back-pointers to its originating `.weasel` source span. This is the foundation the LSP proxy relies on to translate coordinates between the two files.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
