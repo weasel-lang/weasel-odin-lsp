@@ -4,14 +4,14 @@ level: task
 title: "Implement lexer / scanner for .weasel files"
 short_code: "WEASEL-T-0001"
 created_at: 2026-04-21T22:11:28.584791+00:00
-updated_at: 2026-04-21T22:11:28.584791+00:00
+updated_at: 2026-04-22T10:56:21.068868+00:00
 parent: WEASEL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -63,6 +63,10 @@ Implement a lexer/scanner that reads a `.weasel` source file and produces a flat
 - **Current Problems**: {What's difficult/slow/buggy now}
 - **Benefits of Fixing**: {What improves after refactoring}
 - **Risk Assessment**: {Risks of not addressing this}
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
@@ -136,4 +140,25 @@ Nested braces are the main complexity: `{for x in y { <tag/> }}` requires correc
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+**Files created:**
+- `transpiler/lexer.odin` — scanner implementation (`package transpiler`)
+- `transpiler/lexer_test.odin` — 15 tests using `core:testing`
+
+**Design decisions:**
+- `_Scanner` struct with `offset/line/col` for position tracking; `Position` recorded at `<` for `Element_Open`
+- Depth counter (`depth int`) drives state: `depth == 0` → Odin passthrough, `depth > 0` → element content mode
+- `_scan_brace_expr` handles nested `{}`, double-quoted strings, raw (backtick) strings, rune literals, line and block comments — none of which affect brace depth
+- `InlineExpr` content captured verbatim; nested elements inside `{…}` are NOT recursively tokenized — the parser (T-0003) recurses into them
+- `ElementOpen` position records `<`; tag name and all attributes are separate tokens
+
+**All acceptance criteria met:**
+- [x] Token types: `Odin_Text`, `Element_Open`, `Element_Close`, `Attr_Static`, `Attr_Dynamic`, `Inline_Expr`, `Self_Close`, `EOF`
+- [x] `/<[a-z_]/` triggers element open; `</tag>` triggers element close; `/>` triggers self-close
+- [x] Odin source between Weasel markers captured verbatim as `Odin_Text`
+- [x] `{…}` in element content → `Inline_Expr` with inner span
+- [x] Nested braces handled correctly (strings, raw strings, comments, rune literals)
+- [x] Meaningful errors with line/col for malformed input
+
+**Test results:** 15/15 passing

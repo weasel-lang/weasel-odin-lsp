@@ -4,14 +4,14 @@ level: task
 title: "Implement first-pass template proc registry"
 short_code: "WEASEL-T-0002"
 created_at: 2026-04-21T22:11:30.810170+00:00
-updated_at: 2026-04-21T22:11:30.810170+00:00
+updated_at: 2026-04-22T11:05:44.332849+00:00
 parent: WEASEL-I-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -61,6 +61,10 @@ Implement the stateless element resolution heuristic (see WEASEL-A-0002) used by
 - **Current Problems**: {What's difficult/slow/buggy now}
 - **Benefits of Fixing**: {What improves after refactoring}
 - **Risk Assessment**: {Risks of not addressing this}
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
@@ -134,4 +138,12 @@ The HTML tag map must be comprehensive. Use the WHATWG HTML living standard elem
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+### 2026-04-22 — Implementation complete
+
+Created two files:
+
+- `transpiler/tags.odin` — defines `Tag_Kind` enum (`Raw`, `Component`) and `resolve_tag(name: string) -> Tag_Kind`. Pure function, no global state, no allocations. Three-rule heuristic: dash rule → HTML map (full WHATWG living standard including `details`, `dialog`, `summary`, `canvas`, `picture`, `slot`, `search`, `hgroup`, etc.) → default Component.
+
+- `transpiler/tags_test.odin` — 14 unit tests covering: dash rule variants, common HTML tags, uncommon/rarely-tested HTML tags, media/table tag groups, Component resolution for custom names, package-qualified names, empty string, near-miss names.
+
+All 28 tests pass (14 lexer + 14 tags).

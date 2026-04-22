@@ -5,7 +5,7 @@ title: "Children passed as proc callback to component templates"
 number: 1
 short_code: "WEASEL-A-0001"
 created_at: 2026-04-21T22:10:00.974648+00:00
-updated_at: 2026-04-21T22:10:00.974648+00:00
+updated_at: 2026-04-22T11:08:15.005909+00:00
 decision_date: 
 decision_maker: 
 parent: 
@@ -13,7 +13,7 @@ archived: false
 
 tags:
   - "#adr"
-  - "#phase/draft"
+  - "#phase/decided"
 
 
 exit_criteria_met: false
