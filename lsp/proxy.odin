@@ -83,18 +83,44 @@ Document :: struct {
 // carry framed messages to `ols` and back to the editor.  A single Proxy
 // instance is shared between the two forwarder threads in the `weasel-lsp`
 // binary.
+//
+// Thread model:
+//   `state_mu` serialises access to `documents` and `pending` between
+//   the editor→ols and ols→editor threads.  The editor-direction writer
+//   is separately guarded by `editor_write_mu` so proxy-initiated
+//   diagnostics never interleave frames with forwarded responses.
+//   `ols_writer` has a single writer (the editor→ols thread), so no
+//   mutex is needed there.
 Proxy :: struct {
 	documents: map[string]^Document,
+	// pending correlates request id (stringified via _pending_key) with
+	// the `.weasel` URI the editor addressed.  Populated when the
+	// editor sends a position-bearing request, consumed when ols
+	// responds.  Keeps the ols→editor direction able to look up the
+	// right document's source map for a result.
+	pending: map[string]Pending_Request,
 
 	ols_writer:    io.Writer,
 	editor_writer: io.Writer,
 
+	state_mu:        sync.Mutex,
 	editor_write_mu: sync.Mutex,
+}
+
+// Pending_Request captures the subset of editor-side context a
+// response needs to be rewritten: which Weasel document the result
+// positions are against (for position-only items that inherit the
+// URI) and which method was invoked (for error logging and future
+// method-specific nudges).  Both strings are owned by the Proxy.
+Pending_Request :: struct {
+	method:     string,
+	weasel_uri: string,
 }
 
 // proxy_init prepares p.  The two writers must outlive the proxy.
 proxy_init :: proc(p: ^Proxy, ols_writer, editor_writer: io.Writer) {
 	p.documents = make(map[string]^Document)
+	p.pending = make(map[string]Pending_Request)
 	p.ols_writer = ols_writer
 	p.editor_writer = editor_writer
 }
@@ -108,6 +134,13 @@ proxy_destroy :: proc(p: ^Proxy) {
 	}
 	delete(p.documents)
 	p.documents = nil
+	for k, pr in p.pending {
+		delete(k)
+		delete(pr.method)
+		delete(pr.weasel_uri)
+	}
+	delete(p.pending)
+	p.pending = nil
 }
 
 // proxy_write_to_editor serialises a framed write back to the editor.  Used
@@ -122,10 +155,15 @@ proxy_write_to_editor :: proc(p: ^Proxy, body: []u8) -> Frame_Error {
 
 // proxy_process_editor_message handles one framed JSON-RPC body coming from
 // the editor.  For `.weasel` textDocument lifecycle notifications it
-// synthesizes replacement messages toward `ols`; everything else is
-// forwarded verbatim.  A parse failure falls back to verbatim forwarding —
-// we must never swallow a message we don't understand.
+// synthesizes replacement messages toward `ols`; for requests addressed
+// to a known `.weasel` document it rewrites Weasel coordinates to Odin
+// before forwarding.  Everything else is forwarded verbatim.  A parse
+// failure falls back to verbatim forwarding — we must never swallow a
+// message we don't understand.
 proxy_process_editor_message :: proc(p: ^Proxy, body: []u8) -> Frame_Error {
+	sync.mutex_lock(&p.state_mu)
+	defer sync.mutex_unlock(&p.state_mu)
+
 	// Parse and hand off to the dispatcher.  The entire JSON tree is
 	// allocated in a scratch arena-style block and freed via destroy_value
 	// so we don't leak per-message state on the hot path.
@@ -165,8 +203,279 @@ proxy_process_editor_message :: proc(p: ^Proxy, body: []u8) -> Frame_Error {
 		return _handle_did_close(p, body, params)
 	}
 
-	// Any method we don't intercept is forwarded verbatim.
-	return write_message(p.ols_writer, body)
+	// If this message targets a known `.weasel` document, rewrite its
+	// params (coordinates and URIs) before forwarding to ols.  If it's a
+	// request (has an id) we also remember the target URI so the
+	// matching response can be rewritten back on the ols→editor side.
+	return _handle_generic_editor_message(p, body, obj, string(method))
+}
+
+// ---------------------------------------------------------------------------
+// ols → editor message processing (response / notification rewriting)
+// ---------------------------------------------------------------------------
+
+// proxy_process_ols_message handles one framed body coming back from
+// `ols`.  For responses to requests we recorded on the editor→ols side
+// it rewrites Odin coordinates back to Weasel coordinates in the
+// `result` field.  For `textDocument/publishDiagnostics` notifications
+// addressed to one of our shadow `.odin` URIs it rewrites both the URI
+// and each diagnostic's range, dropping diagnostics whose range fails to
+// map.  Everything else forwards verbatim.
+//
+// A parse failure or shape mismatch also forwards verbatim — under no
+// circumstances do we want to swallow an ols message the proxy
+// didn't understand.
+proxy_process_ols_message :: proc(p: ^Proxy, body: []u8) -> Frame_Error {
+	sync.mutex_lock(&p.state_mu)
+	defer sync.mutex_unlock(&p.state_mu)
+
+	v, perr := json.parse(body, parse_integers = true)
+	if perr != .None {
+		return proxy_write_to_editor(p, body)
+	}
+	defer json.destroy_value(v)
+
+	obj, ok := v.(json.Object)
+	if !ok {
+		return proxy_write_to_editor(p, body)
+	}
+
+	// Notifications from ols: dispatch on method name.
+	if method_val, has_method := obj["method"]; has_method {
+		method, is_str := method_val.(json.String)
+		if !is_str {return proxy_write_to_editor(p, body)}
+		switch string(method) {
+		case "textDocument/publishDiagnostics":
+			return _handle_publish_diagnostics_from_ols(p, body, obj)
+		}
+		// Other notifications (e.g. server→client requests with a
+		// method — technically requests, but follow the same shape)
+		// pass through unchanged.
+		return proxy_write_to_editor(p, body)
+	}
+
+	// Response to a request we may have originated.  Look up the
+	// pending entry to find the document whose source map should
+	// interpret the result.
+	id_val, has_id := obj["id"]
+	if !has_id {return proxy_write_to_editor(p, body)}
+
+	key, keyed := _pending_key_owned(id_val)
+	defer if keyed {delete(key)}
+	if !keyed {return proxy_write_to_editor(p, body)}
+
+	pending, found := p.pending[key]
+	if !found {
+		// Response to a request we didn't track (passthrough request)
+		// or to a server-originated request — forward as-is.
+		return proxy_write_to_editor(p, body)
+	}
+
+	// Remove the pending entry and free its owned strings.  The
+	// `key` we used for lookup is a transient copy; the stored key
+	// is freed via delete_key's return.
+	stored_key, stored_val := delete_key(&p.pending, key)
+	defer {
+		delete(stored_key)
+		delete(stored_val.method)
+		delete(stored_val.weasel_uri)
+	}
+
+	doc, have_doc := p.documents[pending.weasel_uri]
+	if !have_doc {
+		// Document was closed between request and response.  Forward
+		// the raw body and let the editor handle stale coordinates —
+		// it's about to see a didClose confirmation anyway.
+		return proxy_write_to_editor(p, body)
+	}
+
+	ctx := _Rewrite_Ctx{
+		proxy       = p,
+		default_doc = doc,
+		dir         = .Odin_To_Weasel,
+	}
+	if result_val, has_result := obj["result"]; has_result {
+		rv := result_val
+		_rewrite_lsp_value(&rv, &ctx)
+		obj["result"] = rv
+	}
+	// Errors don't carry positions; they're forwarded as-is via the
+	// re-marshal below.
+	return _marshal_and_send_to_editor(p, json.Value(obj))
+}
+
+// _handle_publish_diagnostics_from_ols rewrites an incoming
+// publishDiagnostics notification whose URI is one of our shadow
+// `.odin` documents.  Notifications for unrelated URIs pass through.
+@(private = "file")
+_handle_publish_diagnostics_from_ols :: proc(
+	p: ^Proxy,
+	body: []u8,
+	obj: json.Object,
+) -> Frame_Error {
+	params, has_params := obj["params"].(json.Object)
+	if !has_params {return proxy_write_to_editor(p, body)}
+	uri_val, has_uri := params["uri"].(json.String)
+	if !has_uri {return proxy_write_to_editor(p, body)}
+
+	weasel_uri, is_shadow := _odin_uri_to_weasel_uri(string(uri_val))
+	if !is_shadow {return proxy_write_to_editor(p, body)}
+	doc, have_doc := p.documents[weasel_uri]
+	if !have_doc {return proxy_write_to_editor(p, body)}
+
+	ctx := _Rewrite_Ctx{
+		proxy       = p,
+		default_doc = doc,
+		dir         = .Odin_To_Weasel,
+	}
+	pv := obj["params"]
+	_rewrite_lsp_value(&pv, &ctx)
+	return _marshal_and_send_to_editor(p, json.Value(obj))
+}
+
+// _marshal_and_send_to_editor serializes v and writes it to the editor
+// through the mutex-guarded path shared by all editor-bound frames.
+@(private = "file")
+_marshal_and_send_to_editor :: proc(p: ^Proxy, v: any) -> Frame_Error {
+	data, err := json.marshal(v)
+	if err != nil {
+		fmt.eprintfln("weasel-lsp: json marshal failed (ols→editor): %v", err)
+		return .IO
+	}
+	defer delete(data)
+	return proxy_write_to_editor(p, data)
+}
+
+// _odin_uri_to_weasel_uri converts a shadow URI back to its Weasel
+// origin.  Mirrors weasel_uri_to_odin_uri in the opposite direction.
+// Returns ("", false) for URIs that aren't shadow names so the caller
+// can pass them through untouched.
+@(private = "file")
+_odin_uri_to_weasel_uri :: proc(odin_uri: string) -> (string, bool) {
+	if !strings.has_suffix(odin_uri, ".weasel.odin") {return "", false}
+	return odin_uri[:len(odin_uri) - len(".odin")], true
+}
+
+// ---------------------------------------------------------------------------
+// Generic editor→ols rewriting for position-bearing requests
+// ---------------------------------------------------------------------------
+
+// _handle_generic_editor_message handles any editor→ols message that
+// isn't a document lifecycle notification.  When `params.textDocument.uri`
+// names a known `.weasel` document, the walker rewrites Weasel
+// coordinates to Odin inside the params tree and the body is re-marshaled
+// for forwarding.  When an `id` field is present (request, not
+// notification) we also record a pending entry keyed by that id so the
+// matching response can be rewritten back to Weasel coordinates.
+//
+// If the message isn't tied to a known document the original body is
+// forwarded byte-for-byte — we deliberately avoid touching messages
+// that reference unrelated files.
+@(private = "file")
+_handle_generic_editor_message :: proc(
+	p: ^Proxy,
+	body: []u8,
+	obj: json.Object,
+	method: string,
+) -> Frame_Error {
+	target_uri, has_target := _extract_text_document_uri(obj["params"])
+	doc: ^Document
+	if has_target {
+		doc = p.documents[target_uri]
+	}
+	if doc == nil {
+		// Not addressed to one of our documents — pass through unchanged.
+		return write_message(p.ols_writer, body)
+	}
+
+	// Record pending only for requests (those that expect a response).
+	if id_val, has_id := obj["id"]; has_id {
+		owned_key, keyed := _pending_key_owned(id_val)
+		if keyed {
+			// If the id was already in-flight (shouldn't normally
+			// happen) evict and free its entry before replacing so the
+			// stored strings don't leak.
+			old_k, old_v := delete_key(&p.pending, owned_key)
+			if len(old_k) > 0 {
+				delete(old_k)
+				delete(old_v.method)
+				delete(old_v.weasel_uri)
+			}
+			p.pending[owned_key] = Pending_Request{
+				method     = strings.clone(method),
+				weasel_uri = strings.clone(doc.weasel_uri),
+			}
+		}
+	}
+
+	// Rewrite the params tree in place.  The walker mutates nested
+	// objects/arrays through shared handles, so reassignment into `obj`
+	// isn't necessary — marshaling `obj` below sees the rewritten tree.
+	ctx := _Rewrite_Ctx{
+		proxy       = p,
+		default_doc = doc,
+		dir         = .Weasel_To_Odin,
+	}
+	if params_val, has_params := obj["params"]; has_params {
+		pv := params_val
+		_rewrite_lsp_value(&pv, &ctx)
+	}
+	return _marshal_and_send(p.ols_writer, json.Value(obj))
+}
+
+// _extract_text_document_uri pulls `textDocument.uri` out of a params
+// value.  Returns ("", false) when the shape doesn't match — the caller
+// treats that as "no known document" and passes through.
+@(private = "file")
+_extract_text_document_uri :: proc(v: json.Value) -> (string, bool) {
+	params, ok := v.(json.Object)
+	if !ok {return "", false}
+	td, td_ok := params["textDocument"].(json.Object)
+	if !td_ok {return "", false}
+	uri, uri_ok := td["uri"].(json.String)
+	if !uri_ok {return "", false}
+	return string(uri), true
+}
+
+// _pending_key_owned builds a stable map key from a JSON-RPC request
+// id.  Integer and string ids share the same id space per the spec but
+// their JSON shapes differ; prefix each to avoid accidental collision.
+// The returned slice is allocated from context.allocator and must
+// outlive the map entry — the key is freed by the consumer on response
+// lookup or by proxy_destroy on shutdown.  Returns ("", false) for id
+// values that aren't one of the expected scalar shapes.
+@(private = "file")
+_pending_key_owned :: proc(v: json.Value) -> (string, bool) {
+	#partial switch x in v {
+	case json.Integer:
+		buf: [32]u8
+		return strings.concatenate({"i:", _int_to_buf(buf[:], int(x))}), true
+	case json.String:
+		return strings.concatenate({"s:", string(x)}), true
+	}
+	return "", false
+}
+
+// _int_to_buf renders n into buf, right-aligned, and returns the filled
+// slice.  Local because strconv.itoa rounds through the general-purpose
+// number printer and this is the one place we stringify integers.
+@(private = "file")
+_int_to_buf :: proc(buf: []u8, n: int) -> string {
+	if n == 0 {return "0"}
+	neg := n < 0
+	v := n
+	if neg {v = -v}
+	i := len(buf)
+	for v > 0 {
+		i -= 1
+		buf[i] = u8('0' + u8(v % 10))
+		v /= 10
+	}
+	if neg {
+		i -= 1
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }
 
 // ---------------------------------------------------------------------------

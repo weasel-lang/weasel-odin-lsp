@@ -84,6 +84,40 @@ weasel_to_odin :: proc(
 	return _interpolate(pos, entry.weasel_start, entry.odin_start), true
 }
 
+// odin_to_weasel_range_end translates an Odin offset that lies at the
+// *exclusive* end of an LSP Range.  LSP ranges are half-open, so the end
+// position of a token-sized range coincides with the span's exclusive
+// `odin_end` — and `odin_to_weasel` correctly returns false there
+// (nothing is "inside" a zero-width slice).  This variant additionally
+// succeeds when the target matches a span's end boundary and returns
+// that span's `weasel_end`.  Used when rewriting Range.end so an LSP
+// client keeps well-formed half-open ranges.
+odin_to_weasel_range_end :: proc(
+	t: ^Translator,
+	pos: transpiler.Position,
+) -> (transpiler.Position, bool) {
+	if got, ok := odin_to_weasel(t, pos); ok {return got, true}
+	for e in t.odin_sorted {
+		if e.odin_end.offset == pos.offset {return e.weasel_end, true}
+	}
+	return {}, false
+}
+
+// weasel_to_odin_range_end is the inverse half-open variant used on
+// request rewriting.  Succeeds inside a span (via `weasel_to_odin`) or
+// when the target matches a span's `weasel_end`, returning `odin_end`
+// of that span.
+weasel_to_odin_range_end :: proc(
+	t: ^Translator,
+	pos: transpiler.Position,
+) -> (transpiler.Position, bool) {
+	if got, ok := weasel_to_odin(t, pos); ok {return got, true}
+	for e in t.weasel_sorted {
+		if e.weasel_end.offset == pos.offset {return e.odin_end, true}
+	}
+	return {}, false
+}
+
 // _find_span binary-searches a slice of Span_Entry (sorted by the chosen
 // side's start offset) for the first span whose end offset is strictly
 // greater than target.  If that span's start offset is <= target the span

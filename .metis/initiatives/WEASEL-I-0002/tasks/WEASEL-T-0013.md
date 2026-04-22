@@ -4,14 +4,14 @@ level: task
 title: "In-memory transpilation and ols document sync"
 short_code: "WEASEL-T-0013"
 created_at: 2026-04-22T17:55:35.335130+00:00
-updated_at: 2026-04-22T19:10:15.447630+00:00
+updated_at: 2026-04-22T19:29:20.281965+00:00
 parent: WEASEL-I-0002
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,8 @@ initiative_id: WEASEL-I-0002
 ## Objective
 
 Keep `ols` continuously fed with the latest generated Odin text for every open `.weasel` document, entirely in memory. The editor talks to the proxy about `.weasel` files; `ols` sees a live stream of the corresponding `.odin` text via LSP `textDocument/didChange` notifications. This avoids any disk I/O in the hot editing path.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 

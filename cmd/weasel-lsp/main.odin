@@ -3,13 +3,20 @@
 	Language Server).
 
 	Data flow:
-	  editor ──► proxy ──► ols           (editor-to-ols path: document-aware;
-	                                       .weasel lifecycle notifications are
+	  editor ──► proxy ──► ols           (editor-to-ols path: .weasel
+	                                       lifecycle notifications are
 	                                       re-transpiled and replaced with
-	                                       matching .odin-URI notifications)
-	  editor ◄── proxy ◄── ols           (ols-to-editor path: pure passthrough
-	                                       at this stage; T-0014 will add
-	                                       response-position rewriting here)
+	                                       matching .odin-URI notifications;
+	                                       position-bearing requests
+	                                       addressed to a known .weasel
+	                                       document are rewritten
+	                                       Weasel→Odin before forwarding.)
+	  editor ◄── proxy ◄── ols           (ols-to-editor path: responses to
+	                                       tracked requests and
+	                                       publishDiagnostics notifications
+	                                       are rewritten Odin→Weasel before
+	                                       reaching the editor; unrelated
+	                                       frames pass through.)
 
 	Design:
 	  - Spawn `ols` with pipes wired to its stdin/stdout (stderr inherits
@@ -17,12 +24,17 @@
 	  - Two I/O threads, one per direction:
 	      • editor→ols funnels every editor message through
 	        `lsp.proxy_process_editor_message`, which either forwards
-	        verbatim or replaces the body with a synthesized message (e.g.
-	        didOpen for the shadow .odin URI).
-	      • ols→editor forwards responses verbatim via
-	        `lsp.proxy_write_to_editor` so the write is serialised against
-	        proxy-initiated frames (e.g. publishDiagnostics for the Weasel
-	        side of a broken keystroke).
+	        verbatim or replaces the body with a synthesized message
+	        (e.g. didOpen for the shadow .odin URI, or a re-marshaled
+	        request with Weasel→Odin coordinates).
+	      • ols→editor funnels every ols message through
+	        `lsp.proxy_process_ols_message`, which rewrites Odin→Weasel
+	        coordinates and URIs for responses to tracked requests and
+	        for publishDiagnostics targeting our shadow documents.
+	        Writes serialise through `proxy_write_to_editor`, which
+	        also protects proxy-initiated frames (e.g.
+	        publishDiagnostics for the Weasel side of a broken
+	        keystroke).
 	  - Main thread blocks on `process_wait`.  When `ols` exits, the proxy
 	    exits too — with `ols`'s exit code when it's non-zero and an
 	    explanatory message on stderr.
@@ -88,7 +100,7 @@ _forward_ols_to_editor :: proc(f: ^_Ols_To_Editor) {
 		body, err := lsp.read_message(f.src)
 		switch err {
 		case .None:
-			w_err := lsp.proxy_write_to_editor(f.proxy, body)
+			w_err := lsp.proxy_process_ols_message(f.proxy, body)
 			delete(body)
 			if w_err != .None {
 				fmt.eprintfln("weasel-lsp: ols->editor: write error (%v)", w_err)
