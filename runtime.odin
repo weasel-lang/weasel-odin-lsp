@@ -30,7 +30,7 @@ __weasel_write_escaped_string :: proc(w: io.Writer, str: string) -> io.Error {
 /*
 	Writes a raw string directly to the writer without escaping.
 */
-__weasel_write_raw_string :: proc(w: io.Writer, s: string) -> io.Error {
+__weasel_write_raw_string :: #force_inline proc(w: io.Writer, s: string) -> io.Error {
 	_, err := io.write_string(w, s)
 	if err != .None {
 		return err
