@@ -1,19 +1,28 @@
 /*
 	weasel-lsp — LSP proxy that sits between the editor and `ols` (the Odin
-	Language Server).  At this stage it is a pure passthrough: every framed
-	LSP message from the editor is forwarded verbatim to `ols`, and every
-	framed message from `ols` is forwarded verbatim back to the editor.
-	Translation of positions across the Weasel / generated-Odin boundary is
-	the job of later tasks (WEASEL-T-0014); this binary's only job is to
-	make sure the plumbing is solid.
+	Language Server).
+
+	Data flow:
+	  editor ──► proxy ──► ols           (editor-to-ols path: document-aware;
+	                                       .weasel lifecycle notifications are
+	                                       re-transpiled and replaced with
+	                                       matching .odin-URI notifications)
+	  editor ◄── proxy ◄── ols           (ols-to-editor path: pure passthrough
+	                                       at this stage; T-0014 will add
+	                                       response-position rewriting here)
 
 	Design:
 	  - Spawn `ols` with pipes wired to its stdin/stdout (stderr inherits
 	    this process's stderr so `ols` logs are still visible).
-	  - One I/O thread per direction, each reading framed messages from one
-	    side and writing them to the other.  Using the framing layer (not
-	    raw byte forwarding) catches protocol errors early and mirrors the
-	    future shape of the proxy once T-0014 starts rewriting bodies.
+	  - Two I/O threads, one per direction:
+	      • editor→ols funnels every editor message through
+	        `lsp.proxy_process_editor_message`, which either forwards
+	        verbatim or replaces the body with a synthesized message (e.g.
+	        didOpen for the shadow .odin URI).
+	      • ols→editor forwards responses verbatim via
+	        `lsp.proxy_write_to_editor` so the write is serialised against
+	        proxy-initiated frames (e.g. publishDiagnostics for the Weasel
+	        side of a broken keystroke).
 	  - Main thread blocks on `process_wait`.  When `ols` exits, the proxy
 	    exits too — with `ols`'s exit code when it's non-zero and an
 	    explanatory message on stderr.
@@ -32,53 +41,84 @@ import "core:thread"
 
 import "../../lsp"
 
-// A forwarder drains framed messages from src into dst until the source
-// reports a clean EOF (peer closed) or an error.  When the forwarder
-// detects EOF/error it closes `close_on_end` (if non-nil), which signals
-// the opposite side of the proxy that the stream is over.
-Forwarder :: struct {
+// _Editor_To_Ols drains framed editor messages through the proxy, which
+// handles `.weasel` lifecycle notifications and forwards everything else
+// verbatim to `ols`.
+_Editor_To_Ols :: struct {
 	src:          io.Reader,
-	dst:          io.Writer,
 	close_on_end: ^os.File,
-	name:         string,
+	proxy:        ^lsp.Proxy,
 }
 
-_forward :: proc(f: ^Forwarder) {
-	defer _signal_end(f)
+// _Ols_To_Editor forwards framed `ols` messages back to the editor.  Writes
+// go through `lsp.proxy_write_to_editor` so they don't interleave with
+// proxy-initiated frames.
+_Ols_To_Editor :: struct {
+	src:          io.Reader,
+	close_on_end: ^os.File,
+	proxy:        ^lsp.Proxy,
+}
+
+_forward_editor_to_ols :: proc(f: ^_Editor_To_Ols) {
+	defer _signal_end(f.close_on_end)
 
 	for {
 		body, err := lsp.read_message(f.src)
 		switch err {
 		case .None:
-			w_err := lsp.write_message(f.dst, body)
+			w_err := lsp.proxy_process_editor_message(f.proxy, body)
 			delete(body)
 			if w_err != .None {
-				fmt.eprintfln("weasel-lsp: %s: write error (%v)", f.name, w_err)
+				fmt.eprintfln("weasel-lsp: editor->ols: write error (%v)", w_err)
 				return
 			}
 		case .EOF:
 			return
 		case .Unexpected_EOF, .Invalid_Header, .Oversize, .IO:
-			fmt.eprintfln("weasel-lsp: %s: read error (%v)", f.name, err)
+			fmt.eprintfln("weasel-lsp: editor->ols: read error (%v)", err)
 			return
 		}
 	}
 }
 
-// _signal_end closes the forwarder's half-pipe once the forward loop has
-// finished, propagating the end-of-stream to the opposite party.  For the
-// editor->ols direction this is what makes ols see EOF on its stdin and
-// exit cleanly after the LSP `exit` notification.
-_signal_end :: proc(f: ^Forwarder) {
-	if f.close_on_end != nil {
-		os.close(f.close_on_end)
-		f.close_on_end = nil
+_forward_ols_to_editor :: proc(f: ^_Ols_To_Editor) {
+	defer _signal_end(f.close_on_end)
+
+	for {
+		body, err := lsp.read_message(f.src)
+		switch err {
+		case .None:
+			w_err := lsp.proxy_write_to_editor(f.proxy, body)
+			delete(body)
+			if w_err != .None {
+				fmt.eprintfln("weasel-lsp: ols->editor: write error (%v)", w_err)
+				return
+			}
+		case .EOF:
+			return
+		case .Unexpected_EOF, .Invalid_Header, .Oversize, .IO:
+			fmt.eprintfln("weasel-lsp: ols->editor: read error (%v)", err)
+			return
+		}
 	}
 }
 
-_forward_thread_proc :: proc(data: rawptr) {
-	f := (^Forwarder)(data)
-	_forward(f)
+// _signal_end closes the forwarder's half-pipe once its forward loop has
+// finished, propagating the end-of-stream to the opposite party.  For the
+// editor->ols direction this is what makes ols see EOF on its stdin and
+// exit cleanly after the LSP `exit` notification.
+_signal_end :: proc(fd: ^os.File) {
+	if fd != nil {os.close(fd)}
+}
+
+_editor_to_ols_thread :: proc(data: rawptr) {
+	f := (^_Editor_To_Ols)(data)
+	_forward_editor_to_ols(f)
+}
+
+_ols_to_editor_thread :: proc(data: rawptr) {
+	f := (^_Ols_To_Editor)(data)
+	_forward_ols_to_editor(f)
 }
 
 main :: proc() {
@@ -133,17 +173,20 @@ main :: proc() {
 	os.close(ols_stdin_r)
 	os.close(ols_stdout_w)
 
-	editor_to_ols := Forwarder{
+	// Shared proxy state: both threads consult the same document map and
+	// funnel editor-bound writes through the same mutex.
+	proxy: lsp.Proxy
+	lsp.proxy_init(&proxy, os.to_writer(ols_stdin_w), os.to_writer(os.stdout))
+
+	editor_to_ols := _Editor_To_Ols{
 		src          = os.to_reader(os.stdin),
-		dst          = os.to_writer(ols_stdin_w),
 		close_on_end = ols_stdin_w,
-		name         = "editor->ols",
+		proxy        = &proxy,
 	}
-	ols_to_editor := Forwarder{
+	ols_to_editor := _Ols_To_Editor{
 		src          = os.to_reader(ols_stdout_r),
-		dst          = os.to_writer(os.stdout),
 		close_on_end = ols_stdout_r,
-		name         = "ols->editor",
+		proxy        = &proxy,
 	}
 
 	// Threads self-clean on exit; we never join them — the main thread
@@ -151,13 +194,13 @@ main :: proc() {
 	ctx := context
 	thread.create_and_start_with_data(
 		rawptr(&editor_to_ols),
-		_forward_thread_proc,
+		_editor_to_ols_thread,
 		init_context = ctx,
 		self_cleanup = true,
 	)
 	thread.create_and_start_with_data(
 		rawptr(&ols_to_editor),
-		_forward_thread_proc,
+		_ols_to_editor_thread,
 		init_context = ctx,
 		self_cleanup = true,
 	)

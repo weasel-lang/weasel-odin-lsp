@@ -4,14 +4,14 @@ level: task
 title: "weasel-lsp proxy skeleton with stdio JSON-RPC and ols child process"
 short_code: "WEASEL-T-0012"
 created_at: 2026-04-22T17:55:34.193278+00:00
-updated_at: 2026-04-22T18:51:55.744982+00:00
+updated_at: 2026-04-22T19:09:51.655304+00:00
 parent: WEASEL-I-0002
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,8 @@ initiative_id: WEASEL-I-0002
 ## Objective
 
 Stand up the `weasel-lsp` binary as a pure passthrough proxy between an editor and `ols`. No translation yet — just reliable JSON-RPC framing in both directions and a stable `ols` child process. This isolates the LSP plumbing from the translation logic so the latter can be added in a focused follow-up.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
