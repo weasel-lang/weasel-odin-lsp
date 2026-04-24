@@ -4,14 +4,14 @@ level: task
 title: "Transpiler: emit $() as escaped string and {} as verbatim block"
 short_code: "WEASEL-T-0018"
 created_at: 2026-04-24T19:20:47.900739+00:00
-updated_at: 2026-04-24T19:20:47.900739+00:00
+updated_at: 2026-04-24T19:44:12.687339+00:00
 parent: WEASEL-I-0003
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,10 @@ initiative_id: WEASEL-I-0003
 ## Objective
 
 Update `transpiler/transpile.odin` to handle the two new node types from the parser. Expression nodes (`$()`) must emit `__weasel_write_escaped_string(<inner_expr>)`. Block nodes (`{}`) must emit the block contents verbatim, interleaving any nested Weasel element emission calls. No changes needed to template signature emission or attribute handling. Depends on WEASEL-T-0017 (parser nodes).
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
@@ -46,5 +50,10 @@ Update `transpiler/transpile.odin` to handle the two new node types from the par
 
 ## Status Updates
 
-*To be added during implementation*
+### 2026-04-24
 
+Transpiler already correctly handles both node types (implemented in T-0016/T-0017 period). Updated stale comments:
+- `_emit_node` Expr_Node case: updated from `{` to `$(` reference; noted T-0019 TODO for the +2 offset
+- `_emit_odin_block`: removed reference to obsolete "Inline_Expr" terminology
+
+All 120 tests pass.

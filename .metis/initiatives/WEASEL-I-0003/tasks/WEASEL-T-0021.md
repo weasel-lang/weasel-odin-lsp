@@ -4,14 +4,14 @@ level: task
 title: "Tests: rewrite corpus files and add expression-vs-block cases"
 short_code: "WEASEL-T-0021"
 created_at: 2026-04-24T19:20:50.924111+00:00
-updated_at: 2026-04-24T19:20:50.924111+00:00
+updated_at: 2026-04-24T19:50:44.769326+00:00
 parent: WEASEL-I-0003
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,10 @@ initiative_id: WEASEL-I-0003
 ## Objective
 
 Update all corpus test files under `tests/corpus/` to use the new grammar: replace `{expr}` expression syntax with `$(expr)` and wrap code blocks in unambiguous `{}`. Update the corresponding `.odin.golden` files to match the new transpiler output. Add at least one new corpus pair (`expression_emission.weasel` / `.odin.golden`) that explicitly exercises expression emission alongside a code block to prevent regression. Depends on WEASEL-T-0018 (transpiler output).
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
@@ -47,5 +51,8 @@ Update all corpus test files under `tests/corpus/` to use the new grammar: repla
 
 ## Status Updates
 
-*To be added during implementation*
+### 2026-04-24
 
+Updated 3 corpus .weasel files: `component_with_children`, `control_flow`, `template_proc` — replaced `{expr}` with `$(expr)`. Regenerated all 7 golden files via `--update`. Added new corpus pair `expression_emission.weasel` / `.odin.golden` exercising multiple `$()` expressions alongside an `{}` if-block.
+
+Full suite passes: 8 corpus + 120 transpiler + 56 LSP = 184 tests, 0 failures.
