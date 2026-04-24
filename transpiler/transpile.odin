@@ -86,6 +86,55 @@ transpile :: proc(
 
 	_sort_entries(&smap)
 	source = strings.to_string(sb)
+
+	// If any Template_Proc was emitted, the output references io.Writer and
+	// io.Error. Inject `import "core:io"` automatically unless the Weasel
+	// source already contains it (so the developer never has to add it).
+	needs_io_import := false
+	has_io_import   := false
+	for node in nodes {
+		switch n in node {
+		case Template_Proc:
+			needs_io_import = true
+		case Odin_Span:
+			if strings.contains(n.text, "core:io") {
+				has_io_import = true
+			}
+		case Expr_Node, Element_Node, Odin_Block:
+			// These cannot carry import declarations.
+		}
+	}
+	if needs_io_import && !has_io_import {
+		inject     := "import \"core:io\"\n"
+		inject_len := len(inject)
+		inject_at  := 0
+		if strings.has_prefix(source, "package ") {
+			if nl := strings.index(source, "\n"); nl >= 0 {
+				inject_at = nl + 1
+			}
+		}
+
+		// Adjust source map entries displaced by the injected line.
+		for &entry in smap.entries {
+			if entry.odin_start.offset >= inject_at {
+				entry.odin_start.offset += inject_len
+				entry.odin_start.line   += 1
+				entry.odin_end.offset   += inject_len
+				entry.odin_end.line     += 1
+			} else if entry.odin_end.offset > inject_at {
+				entry.odin_end.offset += inject_len
+				entry.odin_end.line   += 1
+			}
+		}
+
+		sb2 := strings.builder_make(allocator)
+		strings.write_string(&sb2, source[:inject_at])
+		strings.write_string(&sb2, inject)
+		strings.write_string(&sb2, source[inject_at:])
+		delete(sb.buf)
+		source = strings.to_string(sb2)
+	}
+
 	return
 }
 

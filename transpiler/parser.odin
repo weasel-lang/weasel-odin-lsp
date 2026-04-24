@@ -305,8 +305,8 @@ _find_template_decl :: proc(text: string) -> (decl: _Template_Decl, found: bool)
 // Control-flow detection
 // ---------------------------------------------------------------------------
 
-// _is_control_flow returns true when expr begins with a Weasel-supported
-// control-flow keyword (for / if / when / switch).
+// _is_control_flow returns true when expr (after skipping leading whitespace)
+// begins with a Weasel-supported control-flow keyword (for / if / when / switch).
 @(private = "file")
 _is_control_flow :: proc(expr: string) -> bool {
 	_has_kw :: proc(s, kw: string) -> bool {
@@ -315,10 +315,11 @@ _is_control_flow :: proc(expr: string) -> bool {
 		c := s[len(kw)]
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '('
 	}
-	return _has_kw(expr, "for") ||
-	       _has_kw(expr, "if") ||
-	       _has_kw(expr, "when") ||
-	       _has_kw(expr, "switch")
+	s := strings.trim_left(expr, " \t\r\n")
+	return _has_kw(s, "for") ||
+	       _has_kw(s, "if") ||
+	       _has_kw(s, "when") ||
+	       _has_kw(s, "switch")
 }
 
 // _find_first_brace returns the offset of the first '{' not inside a string

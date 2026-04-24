@@ -104,10 +104,10 @@ test_source_map_procedure_name :: proc(t: ^testing.T) {
 	entry, found := _find_span_for_odin_text(out, smap, "greet")
 	testing.expect(t, found, "no span entry covers the 'greet' proc name in the output")
 
-	// Odin side: "greet" is at the start of the output.
-	testing.expect_value(t, entry.odin_start, Position{offset = 0, line = 1, col = 1})
-	testing.expect_value(t, entry.odin_end, Position{offset = 5, line = 1, col = 6})
-	// Weasel side: same — "greet" starts at offset 0.
+	// Odin side: "greet" is on line 2 — shifted by the auto-injected import line.
+	testing.expect_value(t, entry.odin_start, Position{offset = 17, line = 2, col = 1})
+	testing.expect_value(t, entry.odin_end, Position{offset = 22, line = 2, col = 6})
+	// Weasel side: "greet" starts at offset 0 (no shift in the source file).
 	testing.expect_value(t, entry.weasel_start, Position{offset = 0, line = 1, col = 1})
 	testing.expect_value(t, entry.weasel_end, Position{offset = 5, line = 1, col = 6})
 }

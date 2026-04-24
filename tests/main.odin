@@ -36,6 +36,7 @@ main :: proc() {
 	defer delete(pattern)
 
 	paths, glob_err := filepath.glob(pattern)
+
 	if glob_err != nil {
 		fmt.eprintfln("error: cannot glob '%s'", pattern)
 		os.exit(1)
@@ -132,6 +133,7 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 	tokens, scan_errs := transpiler.scan(string(src_bytes))
 	defer delete(tokens)
 	defer delete(scan_errs)
+
 	if len(scan_errs) > 0 {
 		fmt.eprintfln("FAIL  %s: scan errors:", display_name)
 		for e in scan_errs {
@@ -143,6 +145,7 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 	nodes, parse_errs := transpiler.parse(tokens[:])
 	defer delete(nodes)
 	defer delete(parse_errs)
+
 	if len(parse_errs) > 0 {
 		fmt.eprintfln("FAIL  %s: parse errors:", display_name)
 		for e in parse_errs {
@@ -154,6 +157,7 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 	result, smap, transpile_errs := transpiler.transpile(nodes[:])
 	defer delete(transpile_errs)
 	defer transpiler.source_map_destroy(&smap)
+
 	if len(transpile_errs) > 0 {
 		fmt.eprintfln("FAIL  %s: transpile errors:", display_name)
 		for e in transpile_errs {
@@ -182,6 +186,7 @@ _print_diff :: proc(expected, got: string) {
 	for i in 0 ..< limit {
 		exp_line := exp_lines[i] if i < n_exp else ""
 		got_line := got_lines[i] if i < n_got else ""
+
 		if exp_line != got_line {
 			fmt.eprintfln("  line %d:", i + 1)
 			fmt.eprintfln("    expected: %q", exp_line)

@@ -43,7 +43,7 @@ test_transpile_template_proc_no_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "noop :: proc(w: io.Writer) -> io.Error {\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\nnoop :: proc(w: io.Writer) -> io.Error {\n}\n")
 }
 
 @(test)
@@ -52,7 +52,7 @@ test_transpile_template_proc_with_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "card :: proc(w: io.Writer, p: ^Props) -> io.Error {\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\ncard :: proc(w: io.Writer, p: ^Props) -> io.Error {\n}\n")
 }
 
 @(test)
@@ -67,6 +67,85 @@ test_transpile_template_proc_return_type :: proc(t: ^testing.T) {
 		strings.contains(src, ") -> io.Error {"),
 		"expected '-> io.Error' in proc signature",
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Automatic core:io import injection
+// ---------------------------------------------------------------------------
+
+@(test)
+test_transpile_template_injects_io_import :: proc(t: ^testing.T) {
+	// A template proc without an existing core:io import must have one injected.
+	src, errs := _spt("foo :: template() {\n}")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, "import \"core:io\""),
+		"expected injected import \"core:io\"",
+	)
+}
+
+@(test)
+test_transpile_no_template_no_io_import :: proc(t: ^testing.T) {
+	// Plain Odin passthrough with no template must NOT inject the import.
+	src, errs := _spt("x := 42\n")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		!strings.contains(src, "core:io"),
+		"must not inject import when there are no template procs",
+	)
+}
+
+@(test)
+test_transpile_existing_io_import_not_duplicated :: proc(t: ^testing.T) {
+	// If the Weasel source already imports core:io, the transpiler must not add
+	// a second one.
+	src, errs := _spt("import \"core:io\"\nfoo :: template() {\n}")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	count := 0
+	rest  := src
+	for {
+		idx := strings.index(rest, "import \"core:io\"")
+		if idx < 0 { break }
+		count += 1
+		rest   = rest[idx + len("import \"core:io\""):]
+	}
+	testing.expect(t, count == 1, "import \"core:io\" must appear exactly once")
+}
+
+@(test)
+test_transpile_io_import_placed_after_package :: proc(t: ^testing.T) {
+	// When there is a package declaration, the import must follow it.
+	src, errs := _spt("package views\nfoo :: template() {\n}")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	pkg_pos    := strings.index(src, "package views")
+	import_pos := strings.index(src, "import \"core:io\"")
+	testing.expect(t, pkg_pos >= 0,    "expected package declaration in output")
+	testing.expect(t, import_pos >= 0, "expected import \"core:io\" in output")
+	testing.expect(t, pkg_pos < import_pos, "import must follow package declaration")
+}
+
+@(test)
+test_transpile_io_import_precedes_proc_when_no_package :: proc(t: ^testing.T) {
+	// Without a package declaration, the import is prepended before the proc.
+	src, errs := _spt("foo :: template() {\n}")
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	import_pos := strings.index(src, "import \"core:io\"")
+	proc_pos   := strings.index(src, "foo :: proc(")
+	testing.expect(t, import_pos >= 0, "expected import \"core:io\"")
+	testing.expect(t, proc_pos >= 0,   "expected proc declaration")
+	testing.expect(t, import_pos < proc_pos, "import must precede the proc declaration")
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +317,7 @@ test_transpile_template_keyword_replaced_with_proc :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.has_prefix(src, "foo :: proc("),
+		strings.contains(src, "foo :: proc("),
 		"expected 'proc' keyword in emitted output",
 	)
 }

@@ -18,7 +18,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
-import "../transpiler"
+import "../../transpiler"
 
 // Generate_Args defines the flags accepted by `weasel generate`.
 // Unrecognised positional arguments (the .weasel input files) land in overflow.

@@ -236,6 +236,37 @@ test_parse_odin_block_if :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_parse_odin_block_leading_whitespace :: proc(t: ^testing.T) {
+	// Control-flow keywords do not have to immediately follow the opening brace —
+	// leading whitespace (newlines, indentation) must not defeat detection for
+	// any supported keyword.
+	cases := []struct {
+		src:  string,
+		head: string,
+	}{
+		{"<ul>{\n    for x in items {\n        <li />\n    }\n}</ul>", "\n    for x in items "},
+		{"<div>{\n    if show {\n        <span />\n    }\n}</div>", "\n    if show "},
+		{"<div>{\n    switch k {\n    case: <span />\n    }\n}</div>", "\n    switch k "},
+		{"<div>{\n    when ODIN_DEBUG {\n        <span />\n    }\n}</div>", "\n    when ODIN_DEBUG "},
+	}
+
+	for c in cases {
+		nodes, errs := _sp(c.src)
+		defer delete(nodes)
+		defer delete(errs)
+
+		testing.expect_value(t, len(errs), 0)
+		parent := nodes[0].(Element_Node)
+		testing.expect_value(t, len(parent.children), 1)
+
+		blk, ok := parent.children[0].(Odin_Block)
+		testing.expect(t, ok, "expected Odin_Block, got Expr_Node")
+		testing.expect_value(t, blk.head, c.head)
+		testing.expect_value(t, blk.tail, "}")
+	}
+}
+
+@(test)
 test_parse_simple_expr_not_odin_block :: proc(t: ^testing.T) {
 	// "form" starts with 'f' but is not a control-flow keyword.
 	nodes, errs := _sp("<p>{form.name}</p>")

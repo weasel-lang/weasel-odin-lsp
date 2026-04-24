@@ -4,14 +4,14 @@ level: task
 title: "Position rewriting for LSP requests and responses"
 short_code: "WEASEL-T-0014"
 created_at: 2026-04-22T17:55:36.496498+00:00
-updated_at: 2026-04-22T19:29:56.272175+00:00
+updated_at: 2026-04-22T19:51:15.142236+00:00
 parent: WEASEL-I-0002
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -27,6 +27,8 @@ initiative_id: WEASEL-I-0002
 ## Objective
 
 Make the proxy actually useful: parse LSP message bodies for the subset of methods that carry positions, rewrite Weasel coordinates to Odin before forwarding to `ols`, and rewrite Odin coordinates back to Weasel before returning responses to the editor. Non-position methods continue passing through as opaque bytes.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 

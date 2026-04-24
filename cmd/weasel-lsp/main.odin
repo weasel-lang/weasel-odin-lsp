@@ -76,10 +76,12 @@ _forward_editor_to_ols :: proc(f: ^_Editor_To_Ols) {
 
 	for {
 		body, err := lsp.read_message(f.src)
+
 		switch err {
 		case .None:
 			w_err := lsp.proxy_process_editor_message(f.proxy, body)
 			delete(body)
+
 			if w_err != .None {
 				fmt.eprintfln("weasel-lsp: editor->ols: write error (%v)", w_err)
 				return
@@ -98,10 +100,12 @@ _forward_ols_to_editor :: proc(f: ^_Ols_To_Editor) {
 
 	for {
 		body, err := lsp.read_message(f.src)
+
 		switch err {
 		case .None:
 			w_err := lsp.proxy_process_ols_message(f.proxy, body)
 			delete(body)
+
 			if w_err != .None {
 				fmt.eprintfln("weasel-lsp: ols->editor: write error (%v)", w_err)
 				return
@@ -137,6 +141,7 @@ main :: proc() {
 	ols_path := "ols"
 
 	i := 1
+
 	for i < len(os.args) {
 		a := os.args[i]
 		switch a {
