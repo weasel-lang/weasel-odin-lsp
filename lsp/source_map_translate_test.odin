@@ -380,13 +380,94 @@ test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
 	tr := translator_make(&smap)
 	defer translator_destroy(&tr)
 
-	// "greet" appears at Weasel offset 0 and at Odin offset 0 (the proc
-	// name is the first byte of the output).
+	// "greet" appears at Weasel offset 0.  In the generated Odin the
+	// auto-injected `import "core:io"\n` (17 bytes) precedes the proc, so
+	// the Odin offset is 17.
 	odin_pos, ok1 := weasel_to_odin(&tr, transpiler.Position{offset = 0, line = 1, col = 1})
 	testing.expect(t, ok1, "weasel start of 'greet' should resolve")
-	testing.expect_value(t, odin_pos.offset, 0)
+	testing.expect_value(t, odin_pos.offset, 17)
 
 	weasel_pos, ok2 := odin_to_weasel(&tr, odin_pos)
 	testing.expect(t, ok2, "odin start of 'greet' should resolve back")
 	testing.expect_value(t, weasel_pos, transpiler.Position{offset = 0, line = 1, col = 1})
+}
+
+// ---------------------------------------------------------------------------
+// $() expression position round-trip
+// ---------------------------------------------------------------------------
+
+@(test)
+test_translate_roundtrip_expr_via_transpile :: proc(t: ^testing.T) {
+	// "<p>$(name)</p>" — no template so no import injection.
+	// "name" (the inner expression) sits at Weasel offset 5 (after '<p>$(').
+	// After transpiling, "name" appears as the identifier in:
+	//   __weasel_write_escaped_string(w, name) or_return
+	src := "<p>$(name)</p>"
+	tokens, scan_errs := transpiler.scan(src)
+	defer delete(tokens)
+	defer delete(scan_errs)
+	nodes, parse_errs := transpiler.parse(tokens[:])
+	defer delete(nodes)
+	defer delete(parse_errs)
+	out, smap, errs := transpiler.transpile(nodes[:])
+	defer {
+		delete(transmute([]u8)out)
+		transpiler.source_map_destroy(&smap)
+		delete(errs)
+	}
+	testing.expect_value(t, len(errs), 0)
+
+	tr := translator_make(&smap)
+	defer translator_destroy(&tr)
+
+	// Weasel: "name" starts at offset 5, col 6.
+	weasel_expr := transpiler.Position{offset = 5, line = 1, col = 6}
+	odin_pos, ok1 := weasel_to_odin(&tr, weasel_expr)
+	testing.expect(t, ok1, "weasel position inside $() should resolve to odin")
+	// The Odin text at that offset must be 'n' (start of "name").
+	testing.expect(
+		t,
+		odin_pos.offset < len(out) && out[odin_pos.offset] == 'n',
+		"odin position should point at 'n' of 'name' in write call",
+	)
+
+	// Round-trip: the Odin position must map back to exactly the same Weasel start.
+	weasel_back, ok2 := odin_to_weasel(&tr, odin_pos)
+	testing.expect(t, ok2, "odin expression position should round-trip back to weasel")
+	testing.expect_value(t, weasel_back, weasel_expr)
+}
+
+@(test)
+test_translate_expr_range_end_via_transpile :: proc(t: ^testing.T) {
+	// The exclusive end of the "name" span (Weasel offset 9, after "name")
+	// must translate via the range-end variant, mapping to the exclusive
+	// end of the Odin "name" span.
+	src := "<p>$(name)</p>"
+	tokens, scan_errs := transpiler.scan(src)
+	defer delete(tokens)
+	defer delete(scan_errs)
+	nodes, parse_errs := transpiler.parse(tokens[:])
+	defer delete(nodes)
+	defer delete(parse_errs)
+	out, smap, errs := transpiler.transpile(nodes[:])
+	defer {
+		delete(transmute([]u8)out)
+		transpiler.source_map_destroy(&smap)
+		delete(errs)
+	}
+	testing.expect_value(t, len(errs), 0)
+
+	tr := translator_make(&smap)
+	defer translator_destroy(&tr)
+
+	// Weasel end of "name" is at offset 9.
+	weasel_end := transpiler.Position{offset = 9, line = 1, col = 10}
+	odin_end, ok := weasel_to_odin_range_end(&tr, weasel_end)
+	testing.expect(t, ok, "weasel range end of $() expression should resolve")
+	// The character just before this Odin end must be 'e' (last byte of "name").
+	testing.expect(
+		t,
+		odin_end.offset > 0 && odin_end.offset <= len(out) && out[odin_end.offset - 1] == 'e',
+		"odin range end should point one past the 'e' of 'name'",
+	)
 }
