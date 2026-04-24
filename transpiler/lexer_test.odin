@@ -64,44 +64,108 @@ test_self_close_dynamic_attr :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_open_inline_expr_close :: proc(t: ^testing.T) {
+test_expr_simple :: proc(t: ^testing.T) {
+	// $(expr) emits Expr_Open (value=inner) + Expr_Close
+	tokens, errs := scan("<h2>$(p.title)</h2>")
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	// Element_Open Expr_Open Expr_Close Element_Close EOF
+	testing.expect_value(t, len(tokens), 5)
+	testing.expect_value(t, tokens[0].kind, Token_Kind.Element_Open)
+	testing.expect_value(t, tokens[0].value, "h2")
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Expr_Open)
+	testing.expect_value(t, tokens[1].value, "p.title")
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Expr_Close)
+	testing.expect_value(t, tokens[3].kind, Token_Kind.Element_Close)
+	testing.expect_value(t, tokens[3].value, "h2")
+	testing.expect_value(t, tokens[4].kind, Token_Kind.EOF)
+}
+
+@(test)
+test_expr_nested_parens :: proc(t: ^testing.T) {
+	// Nested parentheses inside $() must not close the expression early.
+	tokens, errs := scan("<p>$(fmt.tprintf(\"%v\", x))</p>")
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Expr_Open)
+	testing.expect_value(t, tokens[1].value, `fmt.tprintf("%v", x)`)
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Expr_Close)
+}
+
+@(test)
+test_expr_paren_inside_string :: proc(t: ^testing.T) {
+	// ')' inside a string literal must not close the expression.
+	tokens, errs := scan("<p>$(f(\")\"))</p>")
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Expr_Open)
+	testing.expect_value(t, tokens[1].value, `f(")")`)
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Expr_Close)
+}
+
+@(test)
+test_expr_close_position :: proc(t: ^testing.T) {
+	// Expr_Close.pos must point at the ')' character.
+	tokens, errs := scan("<p>$(x)</p>")
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	// <p> is 3 chars, $( is 2 chars, x is 1 char → ')' is at offset 6, col 7
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Expr_Close)
+	testing.expect_value(t, tokens[2].pos.offset, 6)
+}
+
+@(test)
+test_block_simple :: proc(t: ^testing.T) {
+	// {block} emits Block_Open (value=inner) + Block_Close
 	tokens, errs := scan("<h2>{p.title}</h2>")
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, len(tokens), 4) // Element_Open InlineExpr Element_Close EOF
+	// Element_Open Block_Open Block_Close Element_Close EOF
+	testing.expect_value(t, len(tokens), 5)
 	testing.expect_value(t, tokens[0].kind, Token_Kind.Element_Open)
 	testing.expect_value(t, tokens[0].value, "h2")
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, "p.title")
-	testing.expect_value(t, tokens[2].kind, Token_Kind.Element_Close)
-	testing.expect_value(t, tokens[2].value, "h2")
-	testing.expect_value(t, tokens[3].kind, Token_Kind.EOF)
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
+	testing.expect_value(t, tokens[3].kind, Token_Kind.Element_Close)
+	testing.expect_value(t, tokens[3].value, "h2")
+	testing.expect_value(t, tokens[4].kind, Token_Kind.EOF)
 }
 
 @(test)
-test_nested_braces_in_inline_expr :: proc(t: ^testing.T) {
-	// Brace inside a call argument: closing arg brace must NOT end the InlineExpr.
+test_block_with_nested_braces :: proc(t: ^testing.T) {
+	// Nested braces inside {} must not close the block early.
 	tokens, errs := scan("<p>{fmt.tprintf(\"%v\", x)}</p>")
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, `fmt.tprintf("%v", x)`)
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
 }
 
 @(test)
-test_brace_inside_string_in_inline_expr :: proc(t: ^testing.T) {
+test_block_brace_inside_string :: proc(t: ^testing.T) {
 	// `{` and `}` inside a string literal must not affect brace depth.
 	tokens, errs := scan("<p>{f(\"{}\")}</p>")
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, `f("{}")`)
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
 }
 
 @(test)
@@ -139,22 +203,23 @@ test_package_qualified_tag :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_inline_expr_captures_nested_elements_verbatim :: proc(t: ^testing.T) {
-	// Nested elements inside {…} are captured verbatim; the parser recurses into them.
+test_block_captures_nested_elements_verbatim :: proc(t: ^testing.T) {
+	// Nested elements inside a {…} block are captured verbatim; the parser recurses into them.
 	src := "<ul>{for x in items {\n<li/>\n}}</ul>"
 	tokens, errs := scan(src)
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	// Element_Open InlineExpr Element_Close EOF
-	testing.expect_value(t, len(tokens), 4)
+	// Element_Open Block_Open Block_Close Element_Close EOF
+	testing.expect_value(t, len(tokens), 5)
 	testing.expect_value(t, tokens[0].kind, Token_Kind.Element_Open)
 	testing.expect_value(t, tokens[0].value, "ul")
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, "for x in items {\n<li/>\n}")
-	testing.expect_value(t, tokens[2].kind, Token_Kind.Element_Close)
-	testing.expect_value(t, tokens[2].value, "ul")
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
+	testing.expect_value(t, tokens[3].kind, Token_Kind.Element_Close)
+	testing.expect_value(t, tokens[3].value, "ul")
 }
 
 @(test)
@@ -204,26 +269,59 @@ test_position_tracking :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_backtick_string_in_inline_expr :: proc(t: ^testing.T) {
-	// Raw string literals with embedded braces must not affect brace depth.
+test_block_backtick_string :: proc(t: ^testing.T) {
+	// Raw string literals with embedded braces must not affect block depth.
 	tokens, errs := scan("<p>{f(`{hello}`)}</p>")
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, "f(`{hello}`)")
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
 }
 
 @(test)
-test_line_comment_in_inline_expr :: proc(t: ^testing.T) {
-	// Brace after // comment should not affect depth.
+test_block_line_comment :: proc(t: ^testing.T) {
+	// Brace after // comment should not affect block depth.
 	src := "<p>{x // }\n+ y}</p>"
 	tokens, errs := scan(src)
 	defer delete(tokens)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, tokens[1].kind, Token_Kind.Inline_Expr)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Block_Open)
 	testing.expect_value(t, tokens[1].value, "x // }\n+ y")
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Block_Close)
+}
+
+@(test)
+test_dollar_sign_in_odin_passthrough :: proc(t: ^testing.T) {
+	// '$' at depth 0 (outside element bodies) is plain Odin text.
+	tokens, errs := scan("x := $(foo)\n")
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect_value(t, len(tokens), 2) // OdinText + EOF
+	testing.expect_value(t, tokens[0].kind, Token_Kind.Odin_Text)
+}
+
+@(test)
+test_expr_and_block_mixed :: proc(t: ^testing.T) {
+	// A single element body can contain both $() expressions and {} blocks.
+	src := "<p>$(name){if true { <span /> }}</p>"
+	tokens, errs := scan(src)
+	defer delete(tokens)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	// Element_Open Expr_Open Expr_Close Block_Open Block_Close Element_Close EOF
+	testing.expect_value(t, len(tokens), 7)
+	testing.expect_value(t, tokens[1].kind, Token_Kind.Expr_Open)
+	testing.expect_value(t, tokens[1].value, "name")
+	testing.expect_value(t, tokens[2].kind, Token_Kind.Expr_Close)
+	testing.expect_value(t, tokens[3].kind, Token_Kind.Block_Open)
+	testing.expect_value(t, tokens[3].value, "if true { <span /> }")
+	testing.expect_value(t, tokens[4].kind, Token_Kind.Block_Close)
 }

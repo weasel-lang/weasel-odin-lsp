@@ -6,9 +6,11 @@
 
 	State machine:
 	  - depth == 0  →  Odin passthrough mode: accumulate OdinText until <[a-z_]
-	  - depth  > 0  →  Element-content mode:  {…} becomes InlineExpr; <tag> / </tag>
-	                   continue nesting
-	  - InlineExpr content is captured verbatim (the parser recurses into it)
+	  - depth  > 0  →  Element-content mode:
+	                     $(…)  becomes Expr_Open (value=inner) + Expr_Close
+	                     {…}   becomes Block_Open (value=inner) + Block_Close
+	                     <tag> / </tag> continue nesting
+	  - Expr and Block inner content is captured verbatim (parser recurses as needed)
 */
 package transpiler
 
@@ -31,8 +33,14 @@ Token_Kind :: enum u8 {
 	Attr_Static,
 	// `name={expr}` attribute; value = attr name, extra = expression (no braces)
 	Attr_Dynamic,
-	// `{expr}` in element content; value = raw inner expression (no braces)
-	Inline_Expr,
+	// `$(expr)` in element content; value = raw inner expression (no delimiters)
+	Expr_Open,
+	// `)` closing a preceding Expr_Open; value empty, pos = position of `)`
+	Expr_Close,
+	// `{block}` in element content; value = raw inner block (no braces)
+	Block_Open,
+	// `}` closing a preceding Block_Open; value empty, pos = position of `}`
+	Block_Close,
 	// `/>` — self-close marker for the preceding Element_Open
 	Self_Close,
 }
@@ -51,7 +59,10 @@ Position :: struct {
 //   Element_Open / Close      →  value = tag name
 //   Attr_Static               →  value = attr name,  extra = string value (no quotes)
 //   Attr_Dynamic              →  value = attr name,  extra = expression   (no braces)
-//   Inline_Expr               →  value = expression (no braces)
+//   Expr_Open                 →  value = inner expression (no $( or ))
+//   Expr_Close                →  value empty; pos = position of the closing )
+//   Block_Open                →  value = inner block text (no { or })
+//   Block_Close               →  value empty; pos = position of the closing }
 //   Self_Close / EOF          →  value and extra are empty
 Token :: struct {
 	kind:  Token_Kind,
@@ -255,6 +266,168 @@ _scan_brace_expr :: proc(s: ^_Scanner, errs: ^[dynamic]Scan_Error) -> string {
 	return inner
 }
 
+// Scan a brace-delimited code block `{…}` inside an element body.
+// Returns the raw inner content and the Position of the closing '}'.
+// Handles nested braces, strings, rune literals, and comments identically to
+// _scan_brace_expr; the scanner must be positioned at the opening '{'.
+@(private = "file")
+_scan_brace_block :: proc(
+	s: ^_Scanner,
+	errs: ^[dynamic]Scan_Error,
+) -> (
+	inner: string,
+	close_pos: Position,
+) {
+	pos := _pos(s)
+	_advance(s) // consume '{'
+	start := s.offset
+	depth := 1
+	outer: for s.offset < len(s.src) {
+		ch := s.src[s.offset]
+		switch ch {
+		case '{':
+			depth += 1
+			_advance(s)
+		case '}':
+			depth -= 1
+			if depth == 0 {
+				close_pos = _pos(s)
+				break outer
+			}
+			_advance(s)
+		case '"':
+			_advance(s)
+			for s.offset < len(s.src) {
+				c := _advance(s)
+				if c == '"' {break}
+				if c == '\\' && s.offset < len(s.src) {_advance(s)}
+			}
+		case '`':
+			_advance(s)
+			for s.offset < len(s.src) {
+				if _advance(s) == '`' {break}
+			}
+		case '\'':
+			_advance(s)
+			for s.offset < len(s.src) {
+				c := _advance(s)
+				if c == '\'' {break}
+				if c == '\\' && s.offset < len(s.src) {_advance(s)}
+			}
+		case '/':
+			switch _peek_next(s) {
+			case '/':
+				for s.offset < len(s.src) && s.src[s.offset] != '\n' {
+					_advance(s)
+				}
+			case '*':
+				_advance(s) // /
+				_advance(s) // *
+				for s.offset + 1 < len(s.src) {
+					if s.src[s.offset] == '*' && s.src[s.offset + 1] == '/' {
+						_advance(s) // *
+						_advance(s) // /
+						break
+					}
+					_advance(s)
+				}
+			case:
+				_advance(s)
+			}
+		case:
+			_advance(s)
+		}
+	}
+	inner = s.src[start:s.offset]
+	if depth != 0 {
+		append(errs, Scan_Error{"unterminated brace block", pos})
+	} else {
+		_advance(s) // consume closing '}'
+	}
+	return
+}
+
+// Scan a paren-delimited expression `$(…)` inside an element body.
+// Called when the scanner is positioned at '(' (the '$' has already been consumed).
+// Returns the raw inner content and the Position of the closing ')'.
+// Handles nested parentheses, strings, rune literals, and comments.
+@(private = "file")
+_scan_paren_expr :: proc(
+	s: ^_Scanner,
+	errs: ^[dynamic]Scan_Error,
+) -> (
+	inner: string,
+	close_pos: Position,
+) {
+	pos := _pos(s)
+	_advance(s) // consume '('
+	start := s.offset
+	depth := 1
+	outer: for s.offset < len(s.src) {
+		ch := s.src[s.offset]
+		switch ch {
+		case '(':
+			depth += 1
+			_advance(s)
+		case ')':
+			depth -= 1
+			if depth == 0 {
+				close_pos = _pos(s)
+				break outer
+			}
+			_advance(s)
+		case '"':
+			_advance(s)
+			for s.offset < len(s.src) {
+				c := _advance(s)
+				if c == '"' {break}
+				if c == '\\' && s.offset < len(s.src) {_advance(s)}
+			}
+		case '`':
+			_advance(s)
+			for s.offset < len(s.src) {
+				if _advance(s) == '`' {break}
+			}
+		case '\'':
+			_advance(s)
+			for s.offset < len(s.src) {
+				c := _advance(s)
+				if c == '\'' {break}
+				if c == '\\' && s.offset < len(s.src) {_advance(s)}
+			}
+		case '/':
+			switch _peek_next(s) {
+			case '/':
+				for s.offset < len(s.src) && s.src[s.offset] != '\n' {
+					_advance(s)
+				}
+			case '*':
+				_advance(s) // /
+				_advance(s) // *
+				for s.offset + 1 < len(s.src) {
+					if s.src[s.offset] == '*' && s.src[s.offset + 1] == '/' {
+						_advance(s) // *
+						_advance(s) // /
+						break
+					}
+					_advance(s)
+				}
+			case:
+				_advance(s)
+			}
+		case:
+			_advance(s)
+		}
+	}
+	inner = s.src[start:s.offset]
+	if depth != 0 {
+		append(errs, Scan_Error{"unterminated expression", pos})
+	} else {
+		_advance(s) // consume closing ')'
+	}
+	return
+}
+
 // Append an Odin_Text token for src[start:end] if the span is non-empty.
 @(private = "file")
 _emit_odin_text :: proc(tokens: ^[dynamic]Token, src: string, start, end: int, pos: Position) {
@@ -406,12 +579,15 @@ _scan_element_close :: proc(s: ^_Scanner, tokens: ^[dynamic]Token, errs: ^[dynam
 //   • Attr_Static  — value = name,  extra = unquoted string value
 //   • Attr_Dynamic — value = name,  extra = raw expression (without surrounding braces)
 //   • Self_Close   — closes the immediately preceding Element_Open
-//   • Inline_Expr  — value = raw expression (without surrounding braces)
+//   • Expr_Open    — value = inner expression of $(…) (no delimiters); always followed by Expr_Close
+//   • Expr_Close   — pos = position of the closing ')'; value empty
+//   • Block_Open   — value = inner text of {…} block (no braces); always followed by Block_Close
+//   • Block_Close  — pos = position of the closing '}'; value empty
 //   • Element_Close — value = tag name
 //   • EOF          — always the final token
 //
-// The lexer does NOT recurse into InlineExpr content; nested elements inside
-// {…} blocks are left verbatim for the parser to handle via recursive descent.
+// The lexer does NOT recurse into Expr or Block content; nested elements inside
+// block bodies are left verbatim for the parser to handle via recursive descent.
 scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [dynamic]Scan_Error) {
 	s := _Scanner{src = src, line = 1, col = 1}
 	tokens := make([dynamic]Token, allocator)
@@ -449,12 +625,26 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 			continue
 		}
 
-		// ── Inline expression: `{` inside element content ────────────────────
-		if ch == '{' && depth > 0 {
+		// ── Expression: `$(expr)` inside element content ─────────────────────
+		if ch == '$' && _peek_next(&s) == '(' && depth > 0 {
 			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
 			expr_pos := _pos(&s)
-			expr := _scan_brace_expr(&s, &errs)
-			append(&tokens, Token{kind = .Inline_Expr, value = expr, pos = expr_pos})
+			_advance(&s) // consume '$'
+			inner, close_pos := _scan_paren_expr(&s, &errs)
+			append(&tokens, Token{kind = .Expr_Open, value = inner, pos = expr_pos})
+			append(&tokens, Token{kind = .Expr_Close, pos = close_pos})
+			mark = s.offset
+			mark_pos = _pos(&s)
+			continue
+		}
+
+		// ── Code block: `{block}` inside element content ──────────────────────
+		if ch == '{' && depth > 0 {
+			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+			block_pos := _pos(&s)
+			inner, close_pos := _scan_brace_block(&s, &errs)
+			append(&tokens, Token{kind = .Block_Open, value = inner, pos = block_pos})
+			append(&tokens, Token{kind = .Block_Close, pos = close_pos})
 			mark = s.offset
 			mark_pos = _pos(&s)
 			continue

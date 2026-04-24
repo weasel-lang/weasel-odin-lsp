@@ -4,14 +4,14 @@ level: initiative
 title: "Simplification of grammar"
 short_code: "WEASEL-I-0003"
 created_at: 2026-04-24T19:13:03.521404+00:00
-updated_at: 2026-04-24T19:20:10.584890+00:00
+updated_at: 2026-04-24T19:26:00.407585+00:00
 parent: WEASEL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false

@@ -56,10 +56,9 @@ Element_Node :: struct {
 	pos:      Position,
 }
 
-// Odin_Block is a control-flow block (for / if / when / switch) whose body
-// may contain nested Weasel elements.
-//   head — Odin text before the opening '{', e.g. "for x in items "
-//   tail — always "}" (or empty if the block was malformed)
+// Odin_Block is a {…} code block whose body may contain nested Weasel elements.
+//   head — Odin text before the first inner '{', e.g. "for x in items "
+//   tail — "}" if an inner closing brace was found, or empty
 Odin_Block :: struct {
 	head:     string,
 	children: [dynamic]Node,
@@ -524,9 +523,15 @@ _parse_template :: proc(
 			elem := _parse_element(p, allocator)
 			append(&tp.body, elem)
 
-		case .Inline_Expr:
+		case .Expr_Open:
 			_padvance(p)
-			node := _parse_inline_expr(tok, allocator)
+			if _pcur(p).kind == .Expr_Close {_padvance(p)}
+			append(&tp.body, Expr_Node{expr = tok.value, pos = tok.pos})
+
+		case .Block_Open:
+			_padvance(p)
+			if _pcur(p).kind == .Block_Close {_padvance(p)}
+			node := _parse_block_content(tok, allocator)
 			append(&tp.body, node)
 
 		case .Element_Close:
@@ -620,9 +625,15 @@ _parse_children :: proc(
 			elem := _parse_element(p, allocator)
 			append(out, elem)
 
-		case .Inline_Expr:
+		case .Expr_Open:
 			_padvance(p)
-			node := _parse_inline_expr(tok, allocator)
+			if _pcur(p).kind == .Expr_Close {_padvance(p)}
+			append(out, Expr_Node{expr = tok.value, pos = tok.pos})
+
+		case .Block_Open:
+			_padvance(p)
+			if _pcur(p).kind == .Block_Close {_padvance(p)}
+			node := _parse_block_content(tok, allocator)
 			append(out, node)
 
 		case:
@@ -633,24 +644,21 @@ _parse_children :: proc(
 }
 
 // ---------------------------------------------------------------------------
-// Inline expression parsing
+// Block content parsing
 // ---------------------------------------------------------------------------
 
-// _parse_inline_expr decides whether an Inline_Expr token is a simple
-// Expr_Node or an Odin_Block (control-flow with nested elements).
+// _parse_block_content parses a Block_Open token's inner text into an Odin_Block.
+// The content is always treated as a code block (never an expression) — the $()
+// / {} distinction is now made at the lexer level.
 @(private = "file")
-_parse_inline_expr :: proc(tok: Token, allocator := context.allocator) -> Node {
+_parse_block_content :: proc(tok: Token, allocator := context.allocator) -> Node {
 	expr := tok.value
 
-	if !_is_control_flow(expr) {
-		return Expr_Node{expr = expr, pos = tok.pos}
-	}
-
-	// Control-flow block: split at the first unquoted '{'.
+	// Split at the first unquoted '{' to separate head from inner body.
 	brace_pos := _find_first_brace(expr)
 	if brace_pos < 0 {
-		// No braces — degenerate case, treat as Odin passthrough.
-		return Odin_Span{text = expr, pos = tok.pos}
+		// No inner brace — block contains only a head expression (e.g. a simple statement).
+		return Odin_Block{head = expr, children = make([dynamic]Node, allocator), tail = "", pos = tok.pos}
 	}
 
 	head := expr[:brace_pos]
@@ -708,9 +716,15 @@ _parse_until_eof :: proc(p: ^_Parser, out: ^[dynamic]Node, allocator := context.
 			elem := _parse_element(p, allocator)
 			append(out, elem)
 
-		case .Inline_Expr:
+		case .Expr_Open:
 			_padvance(p)
-			node := _parse_inline_expr(tok, allocator)
+			if _pcur(p).kind == .Expr_Close {_padvance(p)}
+			append(out, Expr_Node{expr = tok.value, pos = tok.pos})
+
+		case .Block_Open:
+			_padvance(p)
+			if _pcur(p).kind == .Block_Close {_padvance(p)}
+			node := _parse_block_content(tok, allocator)
 			append(out, node)
 
 		case .Element_Close:
