@@ -254,8 +254,9 @@ _emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 		}
 	case Expr_Node:
 		_write(e, "__weasel_write_escaped_string(w, ")
-		// Expr_Node.pos is at the opening '{'; the expression bytes start
-		// one column (and one offset) later.
+		// Expr_Node.pos is at the '$' of the $(…) delimiter; the expression
+		// bytes start two columns later (after '$('). Source map accuracy for
+		// this +2 offset is corrected in the T-0019 pass.
 		_write_tracked(e, n.expr, _position_after_byte(n.pos))
 		_write(e, ") or_return\n")
 	case Element_Node:
@@ -503,8 +504,8 @@ _emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 
 @(private = "file")
 _emit_odin_block :: proc(e: ^_Emitter, n: Odin_Block) {
-	// Odin_Block.pos is at the opening '{' of the wrapping Inline_Expr; the
-	// head bytes (e.g. "for x in items ") begin one byte later.
+	// Odin_Block.pos is at the opening '{' of the block; the head bytes
+	// (e.g. "for x in items ") begin one byte later.
 	_write_tracked(e, n.head, _position_after_byte(n.pos))
 	_write_byte(e, '{')
 	_write_byte(e, '\n')
