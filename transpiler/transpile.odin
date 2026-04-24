@@ -255,9 +255,8 @@ _emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 	case Expr_Node:
 		_write(e, "__weasel_write_escaped_string(w, ")
 		// Expr_Node.pos is at the '$' of the $(…) delimiter; the expression
-		// bytes start two columns later (after '$('). Source map accuracy for
-		// this +2 offset is corrected in the T-0019 pass.
-		_write_tracked(e, n.expr, _position_after_byte(n.pos))
+		// bytes start two bytes later (after '$(').
+		_write_tracked(e, n.expr, advance_position(n.pos, "$("))
 		_write(e, ") or_return\n")
 	case Element_Node:
 		_emit_element(e, n)

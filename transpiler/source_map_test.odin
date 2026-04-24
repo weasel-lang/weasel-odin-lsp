@@ -167,7 +167,7 @@ test_source_map_parameter_list :: proc(t: ^testing.T) {
 
 @(test)
 test_source_map_inline_expression :: proc(t: ^testing.T) {
-	src := "<p>{name}</p>"
+	src := "<p>$(name)</p>"
 	out, smap, errs := _spt_with_map(src)
 	defer {
 		delete(transmute([]u8)out)
@@ -180,14 +180,14 @@ test_source_map_inline_expression :: proc(t: ^testing.T) {
 	entry, found := _find_span_for_odin_text(out, smap, "name")
 	testing.expect(t, found, "no span entry covers the inline expr identifier 'name'")
 
-	// Weasel: "name" sits at offset 4 (after '<p>{').
-	testing.expect_value(t, entry.weasel_start, Position{offset = 4, line = 1, col = 5})
-	testing.expect_value(t, entry.weasel_end, Position{offset = 8, line = 1, col = 9})
+	// Weasel: "name" sits at offset 5 (after '<p>$(').
+	testing.expect_value(t, entry.weasel_start, Position{offset = 5, line = 1, col = 6})
+	testing.expect_value(t, entry.weasel_end, Position{offset = 9, line = 1, col = 10})
 }
 
 @(test)
 test_source_map_dotted_inline_expression :: proc(t: ^testing.T) {
-	src := "<p>{user.name}</p>"
+	src := "<p>$(user.name)</p>"
 	out, smap, errs := _spt_with_map(src)
 	defer {
 		delete(transmute([]u8)out)
@@ -199,8 +199,9 @@ test_source_map_dotted_inline_expression :: proc(t: ^testing.T) {
 
 	entry, found := _find_span_for_odin_text(out, smap, "user.name")
 	testing.expect(t, found, "no span entry covers the dotted inline expr 'user.name'")
-	testing.expect_value(t, entry.weasel_start.offset, 4)
-	testing.expect_value(t, entry.weasel_end.offset, 13)
+	// Weasel: "user.name" starts at offset 5 (after '<p>$(') and ends at 14.
+	testing.expect_value(t, entry.weasel_start.offset, 5)
+	testing.expect_value(t, entry.weasel_end.offset, 14)
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +257,7 @@ test_source_map_component_tag_with_props :: proc(t: ^testing.T) {
 test_source_map_entries_sorted_by_odin_offset :: proc(t: ^testing.T) {
 	// Run a moderately complex fixture through and verify the entries slice
 	// is monotonically non-decreasing in odin_start.offset.
-	src := "greet :: template(name: string) {\n<p>Hello, {name}!</p>\n}"
+	src := "greet :: template(name: string) {\n<p>Hello, $(name)!</p>\n}"
 	out, smap, errs := _spt_with_map(src)
 	defer {
 		delete(transmute([]u8)out)
@@ -278,7 +279,7 @@ test_source_map_entries_sorted_by_odin_offset :: proc(t: ^testing.T) {
 test_source_map_fixture_covers_key_identifiers :: proc(t: ^testing.T) {
 	// All LSP-relevant identifiers in this fixture must produce at least one
 	// span entry whose odin slice matches them exactly.
-	src := "greet :: template(name: string) {\n<p>Hello, {name}!</p>\n}"
+	src := "greet :: template(name: string) {\n<p>Hello, $(name)!</p>\n}"
 	out, smap, errs := _spt_with_map(src)
 	defer {
 		delete(transmute([]u8)out)
