@@ -250,8 +250,8 @@ test_transpile_raw_element_with_children :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_inline_expr :: proc(t: ^testing.T) {
-	// {expr} emits __weasel_write_escaped_string(w, expr) or_return.
-	src, errs := _spt("<p>{title}</p>")
+	// $(expr) emits __weasel_write_escaped_string(w, expr) or_return.
+	src, errs := _spt("<p>$(title)</p>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
@@ -264,7 +264,7 @@ test_transpile_inline_expr :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_inline_expr_field_access :: proc(t: ^testing.T) {
-	src, errs := _spt("<span>{p.name}</span>")
+	src, errs := _spt("<span>$(p.name)</span>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
@@ -346,10 +346,10 @@ test_transpile_static_text_in_element :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_static_text_mixed_with_expr :: proc(t: ^testing.T) {
-	// Static text fragments adjacent to {expr} interpolation.
-	// <div>Hello {p.user.name}!</div> should emit three write calls between
+	// Static text fragments adjacent to $(expr) interpolation.
+	// <div>Hello $(p.user.name)!</div> should emit three write calls between
 	// the open/close tags: static "Hello ", escaped expr, static "!".
-	src, errs := _spt("<div>Hello {p.user.name}!</div>")
+	src, errs := _spt("<div>Hello $(p.user.name)!</div>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
@@ -373,7 +373,7 @@ test_transpile_static_text_mixed_with_expr :: proc(t: ^testing.T) {
 @(test)
 test_transpile_static_text_ordering :: proc(t: ^testing.T) {
 	// Verify "Hello " appears before p.user.name and "!" appears after.
-	src, errs := _spt("<div>Hello {p.user.name}!</div>")
+	src, errs := _spt("<div>Hello $(p.user.name)!</div>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
@@ -691,7 +691,7 @@ test_transpile_component_children_slotless_error :: proc(t: ^testing.T) {
 @(test)
 test_transpile_component_children_recursive :: proc(t: ^testing.T) {
 	// Children inside the callback are themselves transpiled recursively.
-	src, errs := _spt("<card><span>{msg}</span></card>")
+	src, errs := _spt("<card><span>$(msg)</span></card>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)

@@ -133,7 +133,7 @@ test_parse_boolean_attr :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_inline_expr :: proc(t: ^testing.T) {
-	nodes, errs := _sp("<h2>{p.title}</h2>")
+	nodes, errs := _sp("<h2>$(p.title)</h2>")
 	defer delete(nodes)
 	defer delete(errs)
 
@@ -151,7 +151,7 @@ test_parse_inline_expr :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_nested_elements :: proc(t: ^testing.T) {
-	nodes, errs := _sp("<div><p>{text}</p></div>")
+	nodes, errs := _sp("<div><p>$(text)</p></div>")
 	defer delete(nodes)
 	defer delete(errs)
 
@@ -267,16 +267,30 @@ test_parse_odin_block_leading_whitespace :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_parse_simple_expr_not_odin_block :: proc(t: ^testing.T) {
-	// "form" starts with 'f' but is not a control-flow keyword.
+test_parse_expr_delimiter :: proc(t: ^testing.T) {
+	// $() always produces Expr_Node; {} always produces Odin_Block.
+	nodes, errs := _sp("<p>$(form.name)</p>")
+	defer delete(nodes)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	p := nodes[0].(Element_Node)
+	expr, is_expr := p.children[0].(Expr_Node)
+	testing.expect(t, is_expr, "expected Expr_Node from $()")
+	testing.expect_value(t, expr.expr, "form.name")
+}
+
+@(test)
+test_parse_block_delimiter :: proc(t: ^testing.T) {
+	// {} always produces Odin_Block regardless of content.
 	nodes, errs := _sp("<p>{form.name}</p>")
 	defer delete(nodes)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
 	p := nodes[0].(Element_Node)
-	_, is_expr := p.children[0].(Expr_Node)
-	testing.expect(t, is_expr, "expected Expr_Node, not Odin_Block")
+	_, is_block := p.children[0].(Odin_Block)
+	testing.expect(t, is_block, "expected Odin_Block from {}")
 }
 
 // ---------------------------------------------------------------------------
