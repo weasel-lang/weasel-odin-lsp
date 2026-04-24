@@ -1,3 +1,4 @@
+import "core:io"
 greet :: proc(w: io.Writer, name: string) -> io.Error {
 __weasel_write_raw_string(w, "<p>") or_return
 __weasel_write_raw_string(w, "Hello, ") or_return

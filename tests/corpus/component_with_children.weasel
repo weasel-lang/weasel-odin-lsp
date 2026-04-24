@@ -1,1 +1,1 @@
-<layout><p>{msg}</p></layout>
+<layout><p>$(msg)</p></layout>

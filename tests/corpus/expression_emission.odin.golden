@@ -1,0 +1,22 @@
+import "core:io"
+page :: proc(w: io.Writer, p: ^Props) -> io.Error {
+__weasel_write_raw_string(w, "<div class=\"content\">") or_return
+__weasel_write_raw_string(w, "\n") or_return
+__weasel_write_raw_string(w, "<h1>") or_return
+__weasel_write_escaped_string(w, p.title) or_return
+__weasel_write_raw_string(w, "</h1>") or_return
+__weasel_write_raw_string(w, "\n") or_return
+__weasel_write_raw_string(w, "<p>") or_return
+__weasel_write_escaped_string(w, p.body) or_return
+__weasel_write_raw_string(w, "</p>") or_return
+__weasel_write_raw_string(w, "\n") or_return
+if p.show_footer {
+__weasel_write_raw_string(w, "<footer>") or_return
+__weasel_write_escaped_string(w, p.footer) or_return
+__weasel_write_raw_string(w, "</footer>") or_return
+}
+__weasel_write_raw_string(w, "\n") or_return
+__weasel_write_raw_string(w, "</div>") or_return
+
+}
+
