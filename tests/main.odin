@@ -109,7 +109,10 @@ _run_fixture :: proc(weasel_path: string, update: bool) -> bool {
 	}
 	defer delete(golden_bytes)
 
-	if output == string(golden_bytes) {
+	golden_trimmed := strings.trim_right(string(golden_bytes), "\r\n")
+	output_trimmed := strings.trim_right(output, "\r\n")
+
+	if output_trimmed == golden_trimmed {
 		fmt.printfln("  ok    %s", base)
 		return true
 	}

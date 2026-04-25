@@ -1,0 +1,30 @@
+
+Task :: struct {
+    name:        string,
+    description: string,
+    priority:    u32,
+    due:         u64,
+}
+
+Task_Item_Props :: struct {
+    task: ^Task,
+}
+
+item :: template(p: Task_Item_Props) {
+    <h2>$(p.task.name) &ndash; P$(p.task.prio)</h2>
+    <p>$(p.task.description)</p>
+}
+
+Task_List_Props :: struct {
+    tasks: [dynamic]Task,
+}
+
+list :: template(p: Task_List_Props) {
+    <ul>
+        {
+            for task of p.tasks {
+                <item task=$(task) />
+            }
+        }
+    </ul>
+}

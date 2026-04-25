@@ -1,0 +1,44 @@
+import "core:io"
+
+Task :: struct {
+    name:        string,
+    description: string,
+    priority:    u32,
+    due:         u64,
+}
+
+Task_Item_Props :: struct {
+    task: ^Task,
+}
+
+item :: proc(w: io.Writer, p: Task_Item_Props) -> io.Error {
+    __weasel_write_raw_string(w, "<h2>") or_return
+__weasel_write_escaped_string(w, p.task.name) or_return
+__weasel_write_raw_string(w, " &ndash; P") or_return
+__weasel_write_escaped_string(w, p.task.prio) or_return
+__weasel_write_raw_string(w, "</h2>") or_return
+
+    __weasel_write_raw_string(w, "<p>") or_return
+__weasel_write_escaped_string(w, p.task.description) or_return
+__weasel_write_raw_string(w, "</p>") or_return
+
+}
+
+
+Task_List_Props :: struct {
+    tasks: [dynamic]Task,
+}
+
+list :: proc(w: io.Writer, p: Task_List_Props) -> io.Error {
+    __weasel_write_raw_string(w, "<ul>") or_return
+__weasel_write_raw_string(w, "\n        ") or_return
+
+            for task of p.tasks {
+
+                item(w) or_return
+
+            }
+__weasel_write_raw_string(w, "\n    ") or_return
+__weasel_write_raw_string(w, "</ul>") or_return
+
+}
