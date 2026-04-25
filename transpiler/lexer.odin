@@ -517,6 +517,25 @@ _scan_element_open :: proc(
 					tokens,
 					Token{kind = .Attr_Dynamic, value = attr_name, extra = expr, pos = attr_pos},
 				)
+			case '$':
+				if _peek_next(s) == '(' {
+					_advance(s) // consume '$'
+					expr, _ := _scan_paren_expr(s, errs)
+					append(
+						tokens,
+						Token{kind = .Attr_Dynamic, value = attr_name, extra = expr, pos = attr_pos},
+					)
+				} else {
+					append(
+						errs,
+						Scan_Error{fmt.aprintf("expected '$(' in attribute '%s'", attr_name), _pos(s)},
+					)
+					for s.offset < len(s.src) {
+						c := s.src[s.offset]
+						if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' {break}
+						_advance(s)
+					}
+				}
 			case:
 				append(
 					errs,
