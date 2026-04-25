@@ -468,7 +468,7 @@ _emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 
 	// Props struct argument (only when attributes are present).
 	if len(n.attrs) > 0 {
-		_write(e, ", &")
+		_write(e, ", ")
 		_write_props_name(e, n.tag, tag_pos)
 		_write_byte(e, '{')
 		for i in 0 ..< len(n.attrs) {

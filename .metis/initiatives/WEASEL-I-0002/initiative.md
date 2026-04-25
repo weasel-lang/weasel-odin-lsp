@@ -4,14 +4,14 @@ level: initiative
 title: "Weasel LSP provider"
 short_code: "WEASEL-I-0002"
 created_at: 2026-04-22T17:17:32.190493+00:00
-updated_at: 2026-04-22T18:04:28.377771+00:00
+updated_at: 2026-04-25T12:06:14.380925+00:00
 parent: WEASEL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false

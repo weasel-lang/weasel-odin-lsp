@@ -35,10 +35,11 @@ __weasel_write_raw_string(w, "\n        ") or_return
 
             for task of p.tasks {
 
-                item(w, &Item_Props{task = task}) or_return
+                item(w, Item_Props{task = task}) or_return
 
             }
 __weasel_write_raw_string(w, "\n    ") or_return
 __weasel_write_raw_string(w, "</ul>") or_return
 
 }
+

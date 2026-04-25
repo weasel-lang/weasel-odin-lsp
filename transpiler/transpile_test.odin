@@ -588,22 +588,22 @@ test_transpile_component_self_close_no_attrs :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_component_self_close_with_static_attr :: proc(t: ^testing.T) {
-	// <card title="Task" /> → card(w, &Card_Props{title = "Task"}) or_return
+	// <card title="Task" /> → card(w, Card_Props{title = "Task"}) or_return
 	src, errs := _spt(`<card title="Task" />`)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, `card(w, &Card_Props{title = "Task"}) or_return` + "\n")
+	testing.expect_value(t, src, `card(w, Card_Props{title = "Task"}) or_return` + "\n")
 }
 
 @(test)
 test_transpile_component_self_close_with_dynamic_attr :: proc(t: ^testing.T) {
-	// <card title={t} /> → card(w, &Card_Props{title = t}) or_return
+	// <card title={t} /> → card(w, Card_Props{title = t}) or_return
 	src, errs := _spt("<card title={t} />")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "card(w, &Card_Props{title = t}) or_return\n")
+	testing.expect_value(t, src, "card(w, Card_Props{title = t}) or_return\n")
 }
 
 @(test)
@@ -629,14 +629,14 @@ test_transpile_component_with_children_no_attrs :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_component_with_attrs_and_children :: proc(t: ^testing.T) {
-	// <card title="x"><p></p></card> → card(w, &Card_Props{title = "x"}, proc(...) { ... }) or_return
+	// <card title="x"><p></p></card> → card(w, Card_Props{title = "x"}, proc(...) { ... }) or_return
 	src, errs := _spt(`<card title="x"><p></p></card>`)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `card(w, &Card_Props{title = "x"}, proc(w: io.Writer) -> io.Error {`),
+		strings.contains(src, `card(w, Card_Props{title = "x"}, proc(w: io.Writer) -> io.Error {`),
 		"expected card call with props and children callback",
 	)
 	testing.expect(t, strings.contains(src, "return nil\n}") , "expected return nil in proc")
@@ -645,12 +645,12 @@ test_transpile_component_with_attrs_and_children :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_component_dotted_name :: proc(t: ^testing.T) {
-	// <ui.card title="x" /> → ui.card(w, &Card_Props{title = "x"}) or_return
+	// <ui.card title="x" /> → ui.card(w, Card_Props{title = "x"}) or_return
 	src, errs := _spt(`<ui.card title="x" />`)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, `ui.card(w, &Card_Props{title = "x"}) or_return` + "\n")
+	testing.expect_value(t, src, `ui.card(w, Card_Props{title = "x"}) or_return` + "\n")
 }
 
 @(test)
@@ -672,7 +672,7 @@ test_transpile_component_multiple_attrs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `&Card_Props{title = "Hello", size = n}`),
+		strings.contains(src, `Card_Props{title = "Hello", size = n}`),
 		"expected both attrs in composite literal",
 	)
 }
@@ -711,7 +711,7 @@ test_transpile_component_in_template :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `card(w, &Card_Props{title = "hi"}) or_return`),
+		strings.contains(src, `card(w, Card_Props{title = "hi"}) or_return`),
 		"expected component call inside template body",
 	)
 }

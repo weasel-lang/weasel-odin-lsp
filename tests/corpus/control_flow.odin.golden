@@ -24,3 +24,4 @@ __weasel_write_raw_string(w, "Beta") or_return
 __weasel_write_raw_string(w, "</em>") or_return
 }
 __weasel_write_raw_string(w, "</div>") or_return
+

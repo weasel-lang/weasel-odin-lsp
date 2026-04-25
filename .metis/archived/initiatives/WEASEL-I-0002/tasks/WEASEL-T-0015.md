@@ -7,7 +7,7 @@ created_at: 2026-04-22T17:55:37.506994+00:00
 updated_at: 2026-04-22T17:55:37.506994+00:00
 parent: WEASEL-I-0002
 blocked_by: []
-archived: false
+archived: true
 
 tags:
   - "#task"
@@ -27,6 +27,8 @@ initiative_id: WEASEL-I-0002
 ## Objective
 
 Prove the whole chain works in a real editor. Stand up a small Weasel sample project, configure an editor (VS Code or Neovim) to launch `weasel-lsp` for `.weasel` files, and manually verify that the core LSP features work at correct positions. This is the initiative's exit criterion.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 
