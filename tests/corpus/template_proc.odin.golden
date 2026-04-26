@@ -6,5 +6,6 @@ __weasel_write_escaped_string(w, name) or_return
 __weasel_write_raw_string(w, "!") or_return
 __weasel_write_raw_string(w, "</p>") or_return
 
+return nil
 }
 

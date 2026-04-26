@@ -18,5 +18,6 @@ __weasel_write_raw_string(w, "</footer>") or_return
 __weasel_write_raw_string(w, "\n") or_return
 __weasel_write_raw_string(w, "</div>") or_return
 
+return nil
 }
 

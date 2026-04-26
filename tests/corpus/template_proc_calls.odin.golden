@@ -22,6 +22,7 @@ __weasel_write_raw_string(w, "</h2>") or_return
 __weasel_write_escaped_string(w, p.task.description) or_return
 __weasel_write_raw_string(w, "</p>") or_return
 
+return nil
 }
 
 
@@ -41,5 +42,6 @@ __weasel_write_raw_string(w, "\n        ") or_return
 __weasel_write_raw_string(w, "\n    ") or_return
 __weasel_write_raw_string(w, "</ul>") or_return
 
+return nil
 }
 
