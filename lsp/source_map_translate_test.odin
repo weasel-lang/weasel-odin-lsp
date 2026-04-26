@@ -392,6 +392,47 @@ test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
 	testing.expect_value(t, weasel_pos, transpiler.Position{offset = 0, line = 1, col = 1})
 }
 
+// Template body content — Odin passthrough text that appears in the same
+// token as the template header (the "suffix") must be tracked with the
+// correct Weasel offset, not the token start.
+@(test)
+test_translate_template_body_odin_span :: proc(t: ^testing.T) {
+	// "x" sits at Weasel offset 23 (after "greet :: template() {\n").
+	// Before the fix, the suffix Odin_Span was given pos = token start
+	// (offset 0), so weasel_to_odin at offset 23 returned false.
+	src := "greet :: template() {\nx\n}"
+	tokens, scan_errs := transpiler.scan(src)
+	defer delete(tokens)
+	defer delete(scan_errs)
+	nodes, parse_errs := transpiler.parse(tokens[:])
+	defer delete(nodes)
+	defer delete(parse_errs)
+	out, smap, errs := transpiler.transpile(nodes[:])
+	defer {
+		delete(transmute([]u8)out)
+		transpiler.source_map_destroy(&smap)
+		delete(errs)
+	}
+	testing.expect_value(t, len(errs), 0)
+
+	tr := translator_make(&smap)
+	defer translator_destroy(&tr)
+
+	// "x" is in the template body starting at Weasel offset 22 (line 2, col 1).
+	weasel_x := transpiler.Position{offset = 22, line = 2, col = 1}
+	odin_pos, ok1 := weasel_to_odin(&tr, weasel_x)
+	testing.expect(t, ok1, "weasel position inside template body should resolve to odin")
+	testing.expect(
+		t,
+		odin_pos.offset < len(out) && out[odin_pos.offset] == 'x',
+		"odin position should point at 'x'",
+	)
+
+	weasel_back, ok2 := odin_to_weasel(&tr, odin_pos)
+	testing.expect(t, ok2, "odin position should round-trip back to weasel")
+	testing.expect_value(t, weasel_back, weasel_x)
+}
+
 // ---------------------------------------------------------------------------
 // $() expression position round-trip
 // ---------------------------------------------------------------------------

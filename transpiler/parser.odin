@@ -237,6 +237,7 @@ _Template_Decl :: struct {
 	// caller to compute precise .weasel positions via advance_position.
 	name_off:   int,
 	params_off: int,
+	suffix_off: int, // byte offset of suffix within the Odin_Text token value
 }
 
 // _find_template_decl searches text for "name :: template(params) {" and
@@ -297,6 +298,7 @@ _find_template_decl :: proc(text: string) -> (decl: _Template_Decl, found: bool)
 		suffix     = text[j:],
 		name_off   = name_start,
 		params_off = params_start,
+		suffix_off = j,
 	}, true
 }
 
@@ -416,7 +418,8 @@ _parse_file :: proc(p: ^_Parser, allocator := context.allocator) -> [dynamic]Nod
 				if len(decl.prefix) > 0 {
 					append(&nodes, Odin_Span{text = decl.prefix, pos = tok.pos})
 				}
-				tp := _parse_template(p, decl, tok.pos, allocator)
+				suffix_pos := advance_position(tok.pos, tok.value[:decl.suffix_off])
+				tp := _parse_template(p, decl, tok.pos, suffix_pos, allocator)
 				tp.name_pos   = advance_position(tok.pos, tok.value[:decl.name_off])
 				tp.params_pos = advance_position(tok.pos, tok.value[:decl.params_off])
 				append(&nodes, tp)
@@ -448,6 +451,7 @@ _parse_template :: proc(
 	p: ^_Parser,
 	decl: _Template_Decl,
 	pos: Position,
+	suffix_pos: Position,
 	allocator := context.allocator,
 ) -> Template_Proc {
 	tp := Template_Proc{
@@ -466,15 +470,16 @@ _parse_template :: proc(
 		if zero_at >= 0 {
 			// Entire template body fits in the suffix (no element tokens).
 			if zero_at > 0 {
-				append(&tp.body, Odin_Span{text = decl.suffix[:zero_at], pos = pos})
+				append(&tp.body, Odin_Span{text = decl.suffix[:zero_at], pos = suffix_pos})
 			}
-			_ppush_odin(p, decl.suffix[zero_at + 1:], pos)
+			rest_pos := advance_position(suffix_pos, decl.suffix[:zero_at + 1])
+			_ppush_odin(p, decl.suffix[zero_at + 1:], rest_pos)
 			tp.has_slot = _has_slot(tp.body)
 			return tp
 		}
 		brace_depth = final
 		if len(decl.suffix) > 0 {
-			append(&tp.body, Odin_Span{text = decl.suffix, pos = pos})
+			append(&tp.body, Odin_Span{text = decl.suffix, pos = suffix_pos})
 		}
 	}
 
@@ -495,7 +500,8 @@ _parse_template :: proc(
 				if zero_at > 0 {
 					append(&tp.body, Odin_Span{text = tok.value[:zero_at], pos = tok.pos})
 				}
-				_ppush_odin(p, tok.value[zero_at + 1:], tok.pos)
+				rest_pos := advance_position(tok.pos, tok.value[:zero_at + 1])
+				_ppush_odin(p, tok.value[zero_at + 1:], rest_pos)
 				tp.has_slot = _has_slot(tp.body)
 				return tp
 			}
