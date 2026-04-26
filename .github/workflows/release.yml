@@ -22,11 +22,6 @@ jobs:
             target: macos-arm64
             weasel: weasel-macos-arm64
             lsp: weasel-lsp-macos-arm64
-          - runner: windows-latest
-            target: windows-amd64
-            weasel: weasel-windows-amd64.exe
-            lsp: weasel-lsp-windows-amd64.exe
-
     steps:
       - uses: actions/checkout@v4
 
@@ -47,24 +42,6 @@ jobs:
       - name: Install Odin (macOS)
         if: runner.os == 'macOS'
         run: brew install odin
-
-      - name: Install Odin (Windows)
-        if: runner.os == 'Windows'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          $url = gh api /repos/odin-lang/Odin/releases --jq '.[0].assets[] | select(.name | test("windows.*amd64")) | .browser_download_url'
-          Invoke-WebRequest -Uri $url -OutFile odin.zip
-          Expand-Archive odin.zip -DestinationPath "$env:USERPROFILE\odin-tmp"
-          $inner = Get-ChildItem "$env:USERPROFILE\odin-tmp" | Select-Object -First 1
-          if ($inner.PSIsContainer) {
-            Move-Item $inner.FullName "$env:USERPROFILE\odin"
-          } else {
-            New-Item -ItemType Directory -Path "$env:USERPROFILE\odin" | Out-Null
-            Move-Item "$env:USERPROFILE\odin-tmp\*" "$env:USERPROFILE\odin"
-          }
-          "$env:USERPROFILE\odin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build weasel
         run: odin build cmd/weasel-c/ -out:${{ matrix.weasel }} -o:speed
