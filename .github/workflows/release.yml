@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Release / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux-amd64
+            weasel: weasel-linux-amd64
+            lsp: weasel-lsp-linux-amd64
+          - runner: macos-14
+            target: macos-arm64
+            weasel: weasel-macos-arm64
+            lsp: weasel-lsp-macos-arm64
+          - runner: windows-latest
+            target: windows-amd64
+            weasel: weasel-windows-amd64.exe
+            lsp: weasel-lsp-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Odin (Linux)
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y llvm clang
+          asset=$(gh api /repos/odin-lang/Odin/releases \
+            --jq '.[0].assets[] | select(.name | test("linux.*amd64|ubuntu.*amd64")) | .browser_download_url')
+          curl -fsSL "$asset" -o odin.tar.gz
+          mkdir -p "$HOME/odin"
+          tar xzf odin.tar.gz -C "$HOME/odin" --strip-components=1
+          echo "$HOME/odin" >> "$GITHUB_PATH"
+
+      - name: Install Odin (macOS)
+        if: runner.os == 'macOS'
+        run: brew install odin
+
+      - name: Install Odin (Windows)
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $url = gh api /repos/odin-lang/Odin/releases --jq '.[0].assets[] | select(.name | test("windows.*amd64")) | .browser_download_url'
+          Invoke-WebRequest -Uri $url -OutFile odin.zip
+          Expand-Archive odin.zip -DestinationPath "$env:USERPROFILE\odin-tmp"
+          $inner = Get-ChildItem "$env:USERPROFILE\odin-tmp" | Select-Object -First 1
+          if ($inner.PSIsContainer) {
+            Move-Item $inner.FullName "$env:USERPROFILE\odin"
+          } else {
+            New-Item -ItemType Directory -Path "$env:USERPROFILE\odin" | Out-Null
+            Move-Item "$env:USERPROFILE\odin-tmp\*" "$env:USERPROFILE\odin"
+          }
+          "$env:USERPROFILE\odin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build weasel
+        run: odin build cmd/weasel-c/ -out:${{ matrix.weasel }} -o:speed
+
+      - name: Build weasel-lsp
+        run: odin build cmd/weasel-lsp/ -out:${{ matrix.lsp }} -o:speed
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.weasel }}
+            ${{ matrix.lsp }}
