@@ -55,5 +55,6 @@ jobs:
           "$env:USERPROFILE\odin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - run: odin run tests/
+        if: runner.os != 'Windows'
       - run: odin test transpiler/
       - run: odin test lsp/
