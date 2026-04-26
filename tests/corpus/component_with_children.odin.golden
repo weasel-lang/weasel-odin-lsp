@@ -1,7 +1,7 @@
 layout(w, proc(w: io.Writer) -> io.Error {
-__weasel_write_raw_string(w, "<p>") or_return
-__weasel_write_escaped_string(w, msg) or_return
-__weasel_write_raw_string(w, "</p>") or_return
+weasel.write_raw_string(w, "<p>") or_return
+weasel.write_escaped_string(w, msg) or_return
+weasel.write_raw_string(w, "</p>") or_return
 return nil
 }) or_return
 

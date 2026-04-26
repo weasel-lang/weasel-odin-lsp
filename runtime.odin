@@ -5,7 +5,7 @@ import "core:io"
 /*
 	Writes a string to the writer with special characters that can be used in XSS escaped.
 */
-__weasel_write_escaped_string :: proc(w: io.Writer, str: string) -> io.Error {
+write_escaped_string :: proc(w: io.Writer, str: string) -> io.Error {
 	for i in 0 ..< len(str) {
 		b := str[i]
 
@@ -30,7 +30,7 @@ __weasel_write_escaped_string :: proc(w: io.Writer, str: string) -> io.Error {
 /*
 	Writes a raw string directly to the writer without escaping.
 */
-__weasel_write_raw_string :: #force_inline proc(w: io.Writer, s: string) -> io.Error {
+write_raw_string :: #force_inline proc(w: io.Writer, s: string) -> io.Error {
     _, err := io.write_string(w, s)
 	return err
 }

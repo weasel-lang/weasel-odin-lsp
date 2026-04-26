@@ -130,9 +130,9 @@ test_rewrite_hover_request_records_pending :: proc(t: ^testing.T) {
 	pos, _ := params["position"].(json.Object)
 	line, _ := pos["line"].(json.Integer)
 	char, _ := pos["character"].(json.Integer)
-	// "greet" maps to Odin line 2 (1-indexed) because the auto-injected
-	// import "core:io" occupies line 1.  LSP is 0-indexed → line 1.
-	testing.expect_value(t, int(line), 1)
+	// "greet" maps to Odin line 3 (1-indexed) because the auto-injected
+	// imports occupy lines 1–2.  LSP is 0-indexed → line 2.
+	testing.expect_value(t, int(line), 2)
 	testing.expect_value(t, int(char), 0)
 
 	// Pending entry was recorded under "i:42".
@@ -183,8 +183,8 @@ test_rewrite_hover_response_translates_range :: proc(t: ^testing.T) {
 	bytes.buffer_reset(&tp.ols_buf)
 
 	// ols sends back a Hover pointing at the "greet" token (Odin
-	// line 1 char 0..5, 0-indexed — shifted by the auto-injected import).
-	rsp := `{"jsonrpc":"2.0","id":9,"result":{"contents":"proc","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}}}}`
+	// line 2 char 0..5, 0-indexed — shifted by the auto-injected imports).
+	rsp := `{"jsonrpc":"2.0","id":9,"result":{"contents":"proc","range":{"start":{"line":2,"character":0},"end":{"line":2,"character":5}}}}`
 	testing.expect_value(t, _send_ols_raw(&tp, rsp), Frame_Error.None)
 
 	ed, ok := _drain_one(&tp.editor_buf)
@@ -260,10 +260,10 @@ test_rewrite_response_drops_unmappable_location :: proc(t: ^testing.T) {
 	testing.expect_value(t, _send_editor_raw(&tp, req), Frame_Error.None)
 	bytes.buffer_reset(&tp.ols_buf)
 
-	// Two Locations: one inside the "greet" span (odin line 1 char 0..5)
+	// Two Locations: one inside the "greet" span (odin line 2 char 0..5)
 	// and one far past the end of the generated text (unmappable).
 	rsp := `{"jsonrpc":"2.0","id":12,"result":[
-		{"uri":"file:///tmp/g.weasel.odin","range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}}},
+		{"uri":"file:///tmp/g.weasel.odin","range":{"start":{"line":2,"character":0},"end":{"line":2,"character":5}}},
 		{"uri":"file:///tmp/g.weasel.odin","range":{"start":{"line":99,"character":0},"end":{"line":99,"character":3}}}
 	]}`
 	testing.expect_value(t, _send_ols_raw(&tp, rsp), Frame_Error.None)
@@ -318,9 +318,9 @@ test_rewrite_publish_diagnostics_rewrites_uri_and_filters :: proc(t: ^testing.T)
 	defer _destroy(&tp)
 	_open_greet(&tp)
 
-	// Good diagnostic at "greet" span (Odin line 1 char 0..5, 0-indexed).
+	// Good diagnostic at "greet" span (Odin line 2 char 0..5, 0-indexed).
 	notif := `{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{"uri":"file:///tmp/g.weasel.odin","diagnostics":[
-		{"range":{"start":{"line":1,"character":0},"end":{"line":1,"character":5}},"severity":1,"message":"good one"},
+		{"range":{"start":{"line":2,"character":0},"end":{"line":2,"character":5}},"severity":1,"message":"good one"},
 		{"range":{"start":{"line":99,"character":0},"end":{"line":99,"character":3}},"severity":1,"message":"phantom"}
 	]}}`
 	testing.expect_value(t, _send_ols_raw(&tp, notif), Frame_Error.None)
@@ -477,7 +477,7 @@ test_rewriter_nulls_unmappable_position :: proc(t: ^testing.T) {
 
 // A hover request on a position inside a $() expression in Weasel must be
 // forwarded to ols at the corresponding position inside the generated
-// __weasel_write_escaped_string call.
+// weasel.write_escaped_string call.
 @(test)
 test_rewrite_hover_on_expr_position :: proc(t: ^testing.T) {
 	tp: _TR_Test
@@ -511,9 +511,9 @@ test_rewrite_hover_on_expr_position :: proc(t: ^testing.T) {
 	odin_char, _ := pos["character"].(json.Integer)
 
 	// The forwarded position must be inside the second line (0-indexed line 1):
-	// "__weasel_write_escaped_string(w, name) or_return".
+	// "weasel.write_escaped_string(w, name) or_return".
 	// We don't hardcode the exact character column, just verify it's on the
-	// correct line and character ≥ 33 (after the prefix "__weasel_write_escaped_string(w, ").
+	// correct line and character ≥ 31 (after the prefix "weasel.write_escaped_string(w, ").
 	testing.expect_value(t, int(odin_line), 1)
-	testing.expect(t, int(odin_char) >= 33, "forwarded char should be inside the expression identifier")
+	testing.expect(t, int(odin_char) >= 31, "forwarded char should be inside the expression identifier")
 }

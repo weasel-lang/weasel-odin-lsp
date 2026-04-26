@@ -43,7 +43,7 @@ test_transpile_template_proc_no_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "import \"core:io\"\nnoop :: proc(w: io.Writer) -> io.Error {\nreturn nil\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\nimport \"lib:weasel\"\nnoop :: proc(w: io.Writer) -> io.Error {\nreturn nil\n}\n")
 }
 
 @(test)
@@ -52,7 +52,7 @@ test_transpile_template_proc_with_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "import \"core:io\"\ncard :: proc(w: io.Writer, p: ^Props) -> io.Error {\nreturn nil\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\nimport \"lib:weasel\"\ncard :: proc(w: io.Writer, p: ^Props) -> io.Error {\nreturn nil\n}\n")
 }
 
 @(test)
@@ -205,7 +205,7 @@ test_transpile_void_element_self_close :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, `__weasel_write_raw_string(w, "<br/>") or_return` + "\n")
+	testing.expect_value(t, src, `weasel.write_raw_string(w, "<br/>") or_return` + "\n")
 }
 
 @(test)
@@ -214,7 +214,7 @@ test_transpile_void_element_hr :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, `__weasel_write_raw_string(w, "<hr/>") or_return` + "\n")
+	testing.expect_value(t, src, `weasel.write_raw_string(w, "<hr/>") or_return` + "\n")
 }
 
 @(test)
@@ -225,9 +225,9 @@ test_transpile_raw_element_open_and_close :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	expected :=
-		`__weasel_write_raw_string(w, "<div>") or_return` +
+		`weasel.write_raw_string(w, "<div>") or_return` +
 		"\n" +
-		`__weasel_write_raw_string(w, "</div>") or_return` +
+		`weasel.write_raw_string(w, "</div>") or_return` +
 		"\n"
 	testing.expect_value(t, src, expected)
 }
@@ -238,10 +238,10 @@ test_transpile_raw_element_with_children :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect(t, strings.contains(src, `__weasel_write_raw_string(w, "<ul>") or_return`), "expected ul open")
-	testing.expect(t, strings.contains(src, `__weasel_write_raw_string(w, "<li>") or_return`), "expected li open")
-	testing.expect(t, strings.contains(src, `__weasel_write_raw_string(w, "</li>") or_return`), "expected li close")
-	testing.expect(t, strings.contains(src, `__weasel_write_raw_string(w, "</ul>") or_return`), "expected ul close")
+	testing.expect(t, strings.contains(src, `weasel.write_raw_string(w, "<ul>") or_return`), "expected ul open")
+	testing.expect(t, strings.contains(src, `weasel.write_raw_string(w, "<li>") or_return`), "expected li open")
+	testing.expect(t, strings.contains(src, `weasel.write_raw_string(w, "</li>") or_return`), "expected li close")
+	testing.expect(t, strings.contains(src, `weasel.write_raw_string(w, "</ul>") or_return`), "expected ul close")
 }
 
 // ---------------------------------------------------------------------------
@@ -250,14 +250,14 @@ test_transpile_raw_element_with_children :: proc(t: ^testing.T) {
 
 @(test)
 test_transpile_inline_expr :: proc(t: ^testing.T) {
-	// $(expr) emits __weasel_write_escaped_string(w, expr) or_return.
+	// $(expr) emits weasel.write_escaped_string(w, expr) or_return.
 	src, errs := _spt("<p>$(title)</p>")
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, "__weasel_write_escaped_string(w, title) or_return"),
+		strings.contains(src, "weasel.write_escaped_string(w, title) or_return"),
 		"expected escaped write call for inline expr",
 	)
 }
@@ -270,7 +270,7 @@ test_transpile_inline_expr_field_access :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, "__weasel_write_escaped_string(w, p.name) or_return"),
+		strings.contains(src, "weasel.write_escaped_string(w, p.name) or_return"),
 		"expected escaped write call for field access expr",
 	)
 }
@@ -293,12 +293,12 @@ test_transpile_full_template_with_raw_element :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<div>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<div>") or_return`),
 		"expected div open call",
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "</div>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "</div>") or_return`),
 		"expected div close call",
 	)
 }
@@ -335,11 +335,11 @@ test_transpile_static_text_in_element :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	expected :=
-		`__weasel_write_raw_string(w, "<div>") or_return` +
+		`weasel.write_raw_string(w, "<div>") or_return` +
 		"\n" +
-		`__weasel_write_raw_string(w, "Hello") or_return` +
+		`weasel.write_raw_string(w, "Hello") or_return` +
 		"\n" +
-		`__weasel_write_raw_string(w, "</div>") or_return` +
+		`weasel.write_raw_string(w, "</div>") or_return` +
 		"\n"
 	testing.expect_value(t, src, expected)
 }
@@ -355,17 +355,17 @@ test_transpile_static_text_mixed_with_expr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "Hello ") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "Hello ") or_return`),
 		`expected write call for "Hello " text fragment`,
 	)
 	testing.expect(
 		t,
-		strings.contains(src, "__weasel_write_escaped_string(w, p.user.name) or_return"),
+		strings.contains(src, "weasel.write_escaped_string(w, p.user.name) or_return"),
 		"expected escaped write call for p.user.name",
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "!") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "!") or_return`),
 		`expected write call for "!" text fragment`,
 	)
 }
@@ -420,7 +420,7 @@ test_transpile_static_attr_folded_into_open_tag :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<div class=\"card\">") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<div class=\"card\">") or_return`),
 		`expected static attr folded into open-tag string`,
 	)
 }
@@ -433,7 +433,7 @@ test_transpile_multiple_static_attrs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<a href=\"/home\" class=\"nav\">") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<a href=\"/home\" class=\"nav\">") or_return`),
 		`expected both static attrs in single open-tag string`,
 	)
 }
@@ -447,7 +447,7 @@ test_transpile_dynamic_attr_splits_string :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<div class=\"") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<div class=\"") or_return`),
 		`expected open-tag prefix before dynamic attr`,
 	)
 	testing.expect(
@@ -457,7 +457,7 @@ test_transpile_dynamic_attr_splits_string :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "\">") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "\">") or_return`),
 		`expected closing quote + > after dynamic attr`,
 	)
 }
@@ -489,7 +489,7 @@ test_transpile_mixed_static_and_dynamic_attrs :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<input type=\"text\" value=\"") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<input type=\"text\" value=\"") or_return`),
 		`expected static attr included in prefix`,
 	)
 	testing.expect(
@@ -513,7 +513,7 @@ test_transpile_static_after_dynamic_attr :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "\" class=\"box\">") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "\" class=\"box\">") or_return`),
 		`expected static attr and closing > in suffix`,
 	)
 }
@@ -526,7 +526,7 @@ test_transpile_void_element_with_static_attr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<img src=\"logo.png\"/>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<img src=\"logo.png\"/>") or_return`),
 		`expected static attr in void element`,
 	)
 }
@@ -539,7 +539,7 @@ test_transpile_void_element_with_dynamic_attr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<input value=\"") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<input value=\"") or_return`),
 		`expected prefix for void element with dynamic attr`,
 	)
 	testing.expect(
@@ -549,7 +549,7 @@ test_transpile_void_element_with_dynamic_attr :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "\"/>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "\"/>") or_return`),
 		`expected self-close suffix for void element`,
 	)
 }
@@ -622,7 +622,7 @@ test_transpile_component_with_children_no_attrs :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(src, ") or_return"), "expected or_return after call")
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<p>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<p>") or_return`),
 		"expected p open inside callback",
 	)
 }
@@ -697,7 +697,7 @@ test_transpile_component_children_recursive :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	testing.expect(
 		t,
-		strings.contains(src, "__weasel_write_escaped_string(w, msg) or_return"),
+		strings.contains(src, "weasel.write_escaped_string(w, msg) or_return"),
 		"expected recursive transpilation of inline expr inside callback",
 	)
 }
@@ -729,7 +729,7 @@ test_transpile_odin_block_for :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		strings.contains(src, `__weasel_write_raw_string(w, "<li>") or_return`),
+		strings.contains(src, `weasel.write_raw_string(w, "<li>") or_return`),
 		"expected li open inside for loop",
 	)
 }

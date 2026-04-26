@@ -40,7 +40,7 @@ Odin_Span :: struct {
 }
 
 // Expr_Node is an inline `{expr}` interpolation. The transpiler emits
-// __weasel_write_escaped_string for this node.
+// weasel.write_escaped_string for this node.
 Expr_Node :: struct {
 	expr: string,
 	pos:  Position,

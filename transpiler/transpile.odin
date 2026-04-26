@@ -3,20 +3,20 @@
 
 	Walks the AST produced by parse() and emits valid Odin source code.
 	Template_Proc nodes are rewritten to standard Odin proc declarations.
-	Raw HTML elements become __weasel_write_raw_string calls; inline
-	expressions become __weasel_write_escaped_string calls.
+	Raw HTML elements become weasel.write_raw_string calls; inline
+	expressions become weasel.write_escaped_string calls.
 
 	Emission rules:
 	  Template_Proc  →  name :: proc(w: io.Writer[, params][, children]) -> io.Error { body }
 	  Odin_Span      →  verbatim (Odin context) OR raw-string write call (HTML context)
-	  Expr_Node      →  __weasel_write_escaped_string(w, expr) or_return
+	  Expr_Node      →  weasel.write_escaped_string(w, expr) or_return
 	  Element_Node   →  raw: open/close write calls  |  slot: children(w) or_return
 	  Odin_Block     →  head { children }
 
 	Context flag (in_html):
 	  false  — inside a template body or top-level: Odin_Span is verbatim Odin source
 	  true   — inside element children or Odin_Block children: Odin_Span is HTML text
-	           content and must be emitted as a __weasel_write_raw_string call
+	           content and must be emitted as a weasel.write_raw_string call
 
 	Source map:
 	  While emitting, a cursor tracks (offset, line, col) in the output buffer.
@@ -105,25 +105,26 @@ transpile :: proc(
 		}
 	}
 	if needs_io_import && !has_io_import {
-		inject     := "import \"core:io\"\n"
-		inject_len := len(inject)
-		inject_at  := 0
+		inject      := "import \"core:io\"\nimport \"lib:weasel\"\n"
+		inject_len  := len(inject)
+		inject_lines := 2 // number of newlines in inject
+		inject_at   := 0
 		if strings.has_prefix(source, "package ") {
 			if nl := strings.index(source, "\n"); nl >= 0 {
 				inject_at = nl + 1
 			}
 		}
 
-		// Adjust source map entries displaced by the injected line.
+		// Adjust source map entries displaced by the injected lines.
 		for &entry in smap.entries {
 			if entry.odin_start.offset >= inject_at {
 				entry.odin_start.offset += inject_len
-				entry.odin_start.line   += 1
+				entry.odin_start.line   += inject_lines
 				entry.odin_end.offset   += inject_len
-				entry.odin_end.line     += 1
+				entry.odin_end.line     += inject_lines
 			} else if entry.odin_end.offset > inject_at {
 				entry.odin_end.offset += inject_len
-				entry.odin_end.line   += 1
+				entry.odin_end.line   += inject_lines
 			}
 		}
 
@@ -243,7 +244,7 @@ _emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 			// Text content inside an element: emit as a raw-string write call.
 			// The text itself lives inside the emitted string literal, so no
 			// identifier-level span is recorded.
-			_write(e, `__weasel_write_raw_string(w, "`)
+			_write(e, `weasel.write_raw_string(w, "`)
 			_write_string_literal_content(e, n.text)
 			_write(e, `") or_return`)
 			_write_byte(e, '\n')
@@ -253,7 +254,7 @@ _emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 			_write_tracked(e, n.text, n.pos)
 		}
 	case Expr_Node:
-		_write(e, "__weasel_write_escaped_string(w, ")
+		_write(e, "weasel.write_escaped_string(w, ")
 		// Expr_Node.pos is at the '$' of the $(…) delimiter; the expression
 		// bytes start two bytes later (after '$(').
 		_write_tracked(e, n.expr, advance_position(n.pos, "$("))
@@ -328,7 +329,7 @@ _emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 	}
 
 	// Close tag.
-	_write(e, `__weasel_write_raw_string(w, "</`)
+	_write(e, `weasel.write_raw_string(w, "</`)
 	_write(e, n.tag)
 	_write(e, `>") or_return`)
 	_write_byte(e, '\n')
@@ -343,7 +344,7 @@ _emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 @(private = "file")
 _emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_close: bool) {
 	// pending accumulates raw HTML text for the open tag.  It is flushed to
-	// the emitter as a __weasel_write_raw_string call whenever a dynamic
+	// the emitter as a weasel.write_raw_string call whenever a dynamic
 	// attribute is encountered (or at the very end).
 	pending := strings.builder_make()
 	defer strings.builder_destroy(&pending)
@@ -389,13 +390,13 @@ _emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_clo
 }
 
 // _flush_pending emits the current content of pending as a
-// __weasel_write_raw_string call and resets the builder.  No-ops when pending
+// weasel.write_raw_string call and resets the builder.  No-ops when pending
 // is empty.
 @(private = "file")
 _flush_pending :: proc(e: ^_Emitter, pending: ^strings.Builder) {
 	content := strings.to_string(pending^)
 	if len(content) == 0 {return}
-	_write(e, `__weasel_write_raw_string(w, "`)
+	_write(e, `weasel.write_raw_string(w, "`)
 	_write_string_literal_content(e, content)
 	_write(e, `") or_return`)
 	_write_byte(e, '\n')

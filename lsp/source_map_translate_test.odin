@@ -380,12 +380,12 @@ test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
 	tr := translator_make(&smap)
 	defer translator_destroy(&tr)
 
-	// "greet" appears at Weasel offset 0.  In the generated Odin the
-	// auto-injected `import "core:io"\n` (17 bytes) precedes the proc, so
-	// the Odin offset is 17.
+	// "greet" appears at Weasel offset 0.  In the generated Odin the two
+	// auto-injected import lines (37 bytes total) precede the proc, so
+	// the Odin offset is 37.
 	odin_pos, ok1 := weasel_to_odin(&tr, transpiler.Position{offset = 0, line = 1, col = 1})
 	testing.expect(t, ok1, "weasel start of 'greet' should resolve")
-	testing.expect_value(t, odin_pos.offset, 17)
+	testing.expect_value(t, odin_pos.offset, 37)
 
 	weasel_pos, ok2 := odin_to_weasel(&tr, odin_pos)
 	testing.expect(t, ok2, "odin start of 'greet' should resolve back")
@@ -401,7 +401,7 @@ test_translate_roundtrip_expr_via_transpile :: proc(t: ^testing.T) {
 	// "<p>$(name)</p>" — no template so no import injection.
 	// "name" (the inner expression) sits at Weasel offset 5 (after '<p>$(').
 	// After transpiling, "name" appears as the identifier in:
-	//   __weasel_write_escaped_string(w, name) or_return
+	//   weasel.write_escaped_string(w, name) or_return
 	src := "<p>$(name)</p>"
 	tokens, scan_errs := transpiler.scan(src)
 	defer delete(tokens)

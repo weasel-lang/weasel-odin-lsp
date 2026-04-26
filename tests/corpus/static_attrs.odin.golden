@@ -1,4 +1,4 @@
-__weasel_write_raw_string(w, "<a href=\"/home\" class=\"nav\">") or_return
-__weasel_write_raw_string(w, "Home") or_return
-__weasel_write_raw_string(w, "</a>") or_return
+weasel.write_raw_string(w, "<a href=\"/home\" class=\"nav\">") or_return
+weasel.write_raw_string(w, "Home") or_return
+weasel.write_raw_string(w, "</a>") or_return
 

@@ -1,4 +1,5 @@
 import "core:io"
+import "lib:weasel"
 
 Task :: struct {
     name:        string,
@@ -12,15 +13,15 @@ Task_Item_Props :: struct {
 }
 
 item :: proc(w: io.Writer, p: Task_Item_Props) -> io.Error {
-    __weasel_write_raw_string(w, "<h2>") or_return
-__weasel_write_escaped_string(w, p.task.name) or_return
-__weasel_write_raw_string(w, " &ndash; P") or_return
-__weasel_write_escaped_string(w, p.task.prio) or_return
-__weasel_write_raw_string(w, "</h2>") or_return
+    weasel.write_raw_string(w, "<h2>") or_return
+weasel.write_escaped_string(w, p.task.name) or_return
+weasel.write_raw_string(w, " &ndash; P") or_return
+weasel.write_escaped_string(w, p.task.prio) or_return
+weasel.write_raw_string(w, "</h2>") or_return
 
-    __weasel_write_raw_string(w, "<p>") or_return
-__weasel_write_escaped_string(w, p.task.description) or_return
-__weasel_write_raw_string(w, "</p>") or_return
+    weasel.write_raw_string(w, "<p>") or_return
+weasel.write_escaped_string(w, p.task.description) or_return
+weasel.write_raw_string(w, "</p>") or_return
 
 return nil
 }
@@ -31,16 +32,16 @@ Task_List_Props :: struct {
 }
 
 list :: proc(w: io.Writer, p: Task_List_Props) -> io.Error {
-    __weasel_write_raw_string(w, "<ul>") or_return
-__weasel_write_raw_string(w, "\n        ") or_return
+    weasel.write_raw_string(w, "<ul>") or_return
+weasel.write_raw_string(w, "\n        ") or_return
 
             for task of p.tasks {
 
                 item(w, Item_Props{task = task}) or_return
 
             }
-__weasel_write_raw_string(w, "\n    ") or_return
-__weasel_write_raw_string(w, "</ul>") or_return
+weasel.write_raw_string(w, "\n    ") or_return
+weasel.write_raw_string(w, "</ul>") or_return
 
 return nil
 }
