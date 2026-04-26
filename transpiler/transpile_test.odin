@@ -43,7 +43,7 @@ test_transpile_template_proc_no_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "import \"core:io\"\nnoop :: proc(w: io.Writer) -> io.Error {\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\nnoop :: proc(w: io.Writer) -> io.Error {\nreturn nil\n}\n")
 }
 
 @(test)
@@ -52,7 +52,7 @@ test_transpile_template_proc_with_params :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	testing.expect_value(t, src, "import \"core:io\"\ncard :: proc(w: io.Writer, p: ^Props) -> io.Error {\n}\n")
+	testing.expect_value(t, src, "import \"core:io\"\ncard :: proc(w: io.Writer, p: ^Props) -> io.Error {\nreturn nil\n}\n")
 }
 
 @(test)
