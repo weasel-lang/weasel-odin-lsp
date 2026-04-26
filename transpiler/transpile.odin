@@ -293,7 +293,7 @@ _emit_template_proc :: proc(e: ^_Emitter, n: Template_Proc) {
 		_emit_node(e, node, false)
 	}
 
-	_write(e, "}\n")
+	_write(e, "return nil\n}\n")
 }
 
 @(private = "file")

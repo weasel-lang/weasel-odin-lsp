@@ -195,6 +195,10 @@ main :: proc() {
 	proxy: lsp.Proxy
 	lsp.proxy_init(&proxy, os.to_writer(ols_stdin_w), os.to_writer(os.stdout))
 
+	// Block SIGTERM/SIGINT/SIGHUP in this thread (inherited by all threads
+	// started below) and forward any such signal to ols before exiting.
+	_watch_and_forward_signals(handle)
+
 	editor_to_ols := _Editor_To_Ols{
 		src          = os.to_reader(os.stdin),
 		close_on_end = ols_stdin_w,
