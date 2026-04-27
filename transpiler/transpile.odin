@@ -332,9 +332,10 @@ _emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 // are folded into the raw-string literal; each dynamic attribute splits the
 // literal: the prefix up to and including the attribute name and opening quote
 // is flushed, then the expression is emitted via fmt.wprint, then accumulation
-// continues from the closing quote of the attribute value.
+// continues from the closing quote of the attribute value.  Each spread
+// attribute flushes whatever is pending then emits a write_spread call.
 @(private = "file")
-_emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_close: bool) {
+_emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr_Node, self_close: bool) {
 	// pending accumulates raw HTML text for the open tag.  It is flushed to
 	// the emitter as a weasel.write_raw_string call whenever a dynamic
 	// attribute is encountered (or at the very end).
@@ -345,27 +346,34 @@ _emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_clo
 	strings.write_byte(&pending, '<')
 	strings.write_string(&pending, tag)
 
-	for attr in attrs {
-		if attr.is_dynamic {
-			// Append ` name="` to pending, flush, then emit the expression.
-			strings.write_byte(&pending, ' ')
-			strings.write_string(&pending, attr.name)
-			strings.write_string(&pending, `="`)
-			_flush_pending(e, &pending)
-			// attr.pos points at the attribute name; the expression is an
-			// identifier emitted verbatim, tracked with the attribute origin.
-			e.driver.emit_dynamic_attr("w", attr.expr, attr.pos, e)
-			// Pending resumes from the closing quote of the attribute value.
-			strings.write_byte(&pending, '"')
-		} else {
-			// Static attribute: ` name="value"` or boolean ` name`.
-			strings.write_byte(&pending, ' ')
-			strings.write_string(&pending, attr.name)
-			if len(attr.value) > 0 {
+	for attr_node in attrs {
+		switch attr in attr_node {
+		case Attr:
+			if attr.is_dynamic {
+				// Append ` name="` to pending, flush, then emit the expression.
+				strings.write_byte(&pending, ' ')
+				strings.write_string(&pending, attr.name)
 				strings.write_string(&pending, `="`)
-				strings.write_string(&pending, attr.value)
+				_flush_pending(e, &pending)
+				// attr.pos points at the attribute name; the expression is an
+				// identifier emitted verbatim, tracked with the attribute origin.
+				e.driver.emit_dynamic_attr("w", attr.expr, attr.pos, e)
+				// Pending resumes from the closing quote of the attribute value.
 				strings.write_byte(&pending, '"')
+			} else {
+				// Static attribute: ` name="value"` or boolean ` name`.
+				strings.write_byte(&pending, ' ')
+				strings.write_string(&pending, attr.name)
+				if len(attr.value) > 0 {
+					strings.write_string(&pending, `="`)
+					strings.write_string(&pending, attr.value)
+					strings.write_byte(&pending, '"')
+				}
 			}
+		case Spread_Attr:
+			// Flush any accumulated static attrs, then emit the spread call.
+			_flush_pending(e, &pending)
+			e.driver.emit_spread("w", attr.expr, e)
 		}
 	}
 
@@ -452,16 +460,23 @@ _emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 	_write_tracked(e, n.tag, tag_pos)
 	_write(e, "(w")
 
-	// Props struct argument (only when attributes are present).
-	if len(n.attrs) > 0 {
+	// Props struct argument (only when named attributes are present).
+	// Spread attrs on component calls are not yet supported and are skipped.
+	named_attrs := make([dynamic]Attr, context.temp_allocator)
+	for attr_node in n.attrs {
+		if attr, ok := attr_node.(Attr); ok {
+			append(&named_attrs, attr)
+		}
+	}
+	if len(named_attrs) > 0 {
 		_write(e, ", ")
 		_write_props_name(e, n.tag, tag_pos)
 		_write_byte(e, '{')
-		for i in 0 ..< len(n.attrs) {
+		for i in 0 ..< len(named_attrs) {
 			if i > 0 {
 				_write(e, ", ")
 			}
-			attr := n.attrs[i]
+			attr := named_attrs[i]
 			_write_tracked(e, attr.name, attr.pos)
 			_write(e, " = ")
 			if attr.is_dynamic {

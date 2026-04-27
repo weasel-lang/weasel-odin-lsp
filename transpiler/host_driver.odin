@@ -58,6 +58,11 @@ package transpiler
 //                             statement and closing brace).
 //                             Odin: `return nil\n}\n`
 //
+//   emit_spread             — emits a call that writes a spread attribute bag
+//                             to the writer.  expr is the raw host expression
+//                             of type weasel.Attributes (or host equivalent).
+//                             Odin: `weasel.write_spread(w, expr) or_return\n`
+//
 //   preamble_marker         — prefix of the module/package declaration line
 //                             after which the preamble is injected.
 //                             Odin: `"package "`.
@@ -72,6 +77,7 @@ Host_Driver :: struct {
 	emit_children_close:        proc(e: ^_Emitter),
 	emit_component_call_close:  proc(e: ^_Emitter), // emits `) <error-suffix>\n`
 	emit_epilogue:              proc(e: ^_Emitter),
+	emit_spread:                proc(w_param, expr: string, e: ^_Emitter),
 
 	// --- string fields ---
 	preamble_marker: string, // prefix of the module/package declaration line
@@ -91,6 +97,7 @@ odin_driver :: proc() -> Host_Driver {
 		emit_children_close       = _odin_emit_children_close,
 		emit_component_call_close = _odin_emit_component_call_close,
 		emit_epilogue             = _odin_emit_epilogue,
+		emit_spread               = _odin_emit_spread,
 		preamble_marker     = "package ",
 	}
 }
@@ -170,6 +177,15 @@ _odin_emit_component_call_close :: proc(e: ^_Emitter) {
 @(private = "package")
 _odin_emit_epilogue :: proc(e: ^_Emitter) {
 	_write(e, "return nil\n}\n")
+}
+
+@(private = "package")
+_odin_emit_spread :: proc(w_param, expr: string, e: ^_Emitter) {
+	_write(e, "weasel.write_spread(")
+	_write(e, w_param)
+	_write(e, ", ")
+	_write(e, expr)
+	_write(e, ") or_return\n")
 }
 
 // ---------------------------------------------------------------------------

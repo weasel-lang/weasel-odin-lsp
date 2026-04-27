@@ -62,9 +62,10 @@ test_parse_self_close_component :: proc(t: ^testing.T) {
 	testing.expect_value(t, elem.tag, "task_item")
 	testing.expect_value(t, elem.kind, Tag_Kind.Component)
 	testing.expect_value(t, len(elem.attrs), 1)
-	testing.expect_value(t, elem.attrs[0].name, "task")
-	testing.expect_value(t, elem.attrs[0].expr, "t")
-	testing.expect_value(t, elem.attrs[0].is_dynamic, true)
+	attr0 := elem.attrs[0].(Attr)
+	testing.expect_value(t, attr0.name, "task")
+	testing.expect_value(t, attr0.expr, "t")
+	testing.expect_value(t, attr0.is_dynamic, true)
 }
 
 @(test)
@@ -93,9 +94,10 @@ test_parse_static_attr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	elem := nodes[0].(Element_Node)
 	testing.expect_value(t, len(elem.attrs), 1)
-	testing.expect_value(t, elem.attrs[0].name, "class")
-	testing.expect_value(t, elem.attrs[0].value, "card")
-	testing.expect_value(t, elem.attrs[0].is_dynamic, false)
+	static0 := elem.attrs[0].(Attr)
+	testing.expect_value(t, static0.name, "class")
+	testing.expect_value(t, static0.value, "card")
+	testing.expect_value(t, static0.is_dynamic, false)
 }
 
 @(test)
@@ -107,9 +109,10 @@ test_parse_dynamic_attr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	elem := nodes[0].(Element_Node)
 	testing.expect_value(t, len(elem.attrs), 1)
-	testing.expect_value(t, elem.attrs[0].name, "class")
-	testing.expect_value(t, elem.attrs[0].expr, "cls")
-	testing.expect_value(t, elem.attrs[0].is_dynamic, true)
+	dyn0 := elem.attrs[0].(Attr)
+	testing.expect_value(t, dyn0.name, "class")
+	testing.expect_value(t, dyn0.expr, "cls")
+	testing.expect_value(t, dyn0.is_dynamic, true)
 }
 
 @(test)
@@ -121,10 +124,11 @@ test_parse_boolean_attr :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	elem := nodes[0].(Element_Node)
 	testing.expect_value(t, len(elem.attrs), 1)
-	testing.expect_value(t, elem.attrs[0].name, "disabled")
-	testing.expect_value(t, elem.attrs[0].value, "")
-	testing.expect_value(t, elem.attrs[0].expr, "")
-	testing.expect_value(t, elem.attrs[0].is_dynamic, false)
+	bool0 := elem.attrs[0].(Attr)
+	testing.expect_value(t, bool0.name, "disabled")
+	testing.expect_value(t, bool0.value, "")
+	testing.expect_value(t, bool0.expr, "")
+	testing.expect_value(t, bool0.is_dynamic, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +398,7 @@ test_parse_template_body_element_kinds :: proc(t: ^testing.T) {
 			if elem.tag == "ui.card" {
 				testing.expect_value(t, elem.kind, Tag_Kind.Component)
 				testing.expect_value(t, len(elem.attrs), 1)
-				testing.expect_value(t, elem.attrs[0].is_dynamic, true)
+				testing.expect_value(t, elem.attrs[0].(Attr).is_dynamic, true)
 				card_found = true
 			}
 		}
@@ -433,12 +437,14 @@ test_parse_package_qualified_with_attrs :: proc(t: ^testing.T) {
 	testing.expect_value(t, elem.tag, "ui.card")
 	testing.expect_value(t, elem.kind, Tag_Kind.Component)
 	testing.expect_value(t, len(elem.attrs), 2)
-	testing.expect_value(t, elem.attrs[0].name, "title")
-	testing.expect_value(t, elem.attrs[0].value, "Hello")
-	testing.expect_value(t, elem.attrs[0].is_dynamic, false)
-	testing.expect_value(t, elem.attrs[1].name, "active")
-	testing.expect_value(t, elem.attrs[1].expr, "is_active")
-	testing.expect_value(t, elem.attrs[1].is_dynamic, true)
+	pqa0 := elem.attrs[0].(Attr)
+	testing.expect_value(t, pqa0.name, "title")
+	testing.expect_value(t, pqa0.value, "Hello")
+	testing.expect_value(t, pqa0.is_dynamic, false)
+	pqa1 := elem.attrs[1].(Attr)
+	testing.expect_value(t, pqa1.name, "active")
+	testing.expect_value(t, pqa1.expr, "is_active")
+	testing.expect_value(t, pqa1.is_dynamic, true)
 }
 
 @(test)

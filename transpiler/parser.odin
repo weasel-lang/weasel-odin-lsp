@@ -21,7 +21,7 @@ import "core:strings"
 // AST node types
 // ---------------------------------------------------------------------------
 
-// Attr is a single element attribute.
+// Attr is a single named element attribute.
 //   Boolean   (e.g. `disabled`)      — name set, value and expr empty
 //   Static    (e.g. `class="card"`)  — name and value set, is_dynamic false
 //   Dynamic   (e.g. `class={cls}`)   — name and expr set,  is_dynamic true
@@ -31,6 +31,19 @@ Attr :: struct {
 	expr:       string,
 	is_dynamic: bool,
 	pos:        Position,
+}
+
+// Spread_Attr is a `$(...expr)` spread in element attribute position.
+// The expression is emitted verbatim; type correctness is enforced by the host compiler.
+Spread_Attr :: struct {
+	expr: string,
+	pos:  Position,
+}
+
+// Attr_Node is the sum type for element attributes: either a named Attr or a Spread_Attr.
+Attr_Node :: union {
+	Attr,
+	Spread_Attr,
 }
 
 // Host_Span carries verbatim host source emitted unchanged.
@@ -51,7 +64,7 @@ Expr_Node :: struct {
 Element_Node :: struct {
 	tag:      string,
 	kind:     Tag_Kind,
-	attrs:    [dynamic]Attr,
+	attrs:    [dynamic]Attr_Node,
 	children: [dynamic]Node,
 	pos:      Position,
 }
@@ -548,7 +561,7 @@ _parse_element :: proc(p: ^_Parser, allocator := context.allocator) -> Element_N
 	elem := Element_Node{
 		tag      = open_tok.value,
 		kind     = resolve_tag(open_tok.value),
-		attrs    = make([dynamic]Attr, allocator),
+		attrs    = make([dynamic]Attr_Node, allocator),
 		children = make([dynamic]Node, allocator),
 		pos      = open_tok.pos,
 	}
@@ -559,10 +572,13 @@ _parse_element :: proc(p: ^_Parser, allocator := context.allocator) -> Element_N
 		#partial switch t.kind {
 		case .Attr_Static:
 			_padvance(p)
-			append(&elem.attrs, Attr{name = t.value, value = t.extra, pos = t.pos})
+			append(&elem.attrs, Attr_Node(Attr{name = t.value, value = t.extra, pos = t.pos}))
 		case .Attr_Dynamic:
 			_padvance(p)
-			append(&elem.attrs, Attr{name = t.value, expr = t.extra, is_dynamic = true, pos = t.pos})
+			append(&elem.attrs, Attr_Node(Attr{name = t.value, expr = t.extra, is_dynamic = true, pos = t.pos}))
+		case .Attr_Spread:
+			_padvance(p)
+			append(&elem.attrs, Attr_Node(Spread_Attr{expr = t.value, pos = t.pos}))
 		case .Self_Close:
 			_padvance(p)
 			return elem

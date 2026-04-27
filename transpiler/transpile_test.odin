@@ -733,3 +733,73 @@ test_transpile_odin_block_for :: proc(t: ^testing.T) {
 		"expected li open inside for loop",
 	)
 }
+
+// ---------------------------------------------------------------------------
+// Spread attributes
+// ---------------------------------------------------------------------------
+
+@(test)
+test_transpile_spread_attr_only :: proc(t: ^testing.T) {
+	// $(...p.attrs) alone: open tag flushed before spread, then close.
+	src, errs := _spt(`<div $(...p.attrs)></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_raw_string(w, "<div") or_return`),
+		"expected open tag flushed before spread",
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_spread(w, p.attrs) or_return`),
+		"expected write_spread call with expression",
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_raw_string(w, ">") or_return`),
+		"expected closing > after spread",
+	)
+}
+
+@(test)
+test_transpile_spread_attr_mixed_static :: proc(t: ^testing.T) {
+	// Static attr before spread: static folded into flush, then spread, then close.
+	src, errs := _spt(`<div class="p-2" $(...p.attrs)></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_raw_string(w, "<div class=\"p-2\"") or_return`),
+		"expected static attr folded into flush before spread",
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_spread(w, p.attrs) or_return`),
+		"expected write_spread call",
+	)
+}
+
+@(test)
+test_transpile_spread_attr_multiple :: proc(t: ^testing.T) {
+	// Two spreads: open tag flushed before first, empty flush before second (no-op).
+	src, errs := _spt(`<div $(...a) $(...b)></div>`)
+	defer delete(errs)
+
+	testing.expect_value(t, len(errs), 0)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_spread(w, a) or_return`),
+		"expected first write_spread call",
+	)
+	testing.expect(
+		t,
+		strings.contains(src, `weasel.write_spread(w, b) or_return`),
+		"expected second write_spread call",
+	)
+	// Both spreads must appear, open tag before first, close after second.
+	a_idx := strings.index(src, "write_spread(w, a)")
+	b_idx := strings.index(src, "write_spread(w, b)")
+	testing.expect(t, a_idx >= 0 && b_idx > a_idx, "expected a before b in output")
+}

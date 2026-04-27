@@ -1,0 +1,5 @@
+weasel.write_raw_string(w, "<div") or_return
+weasel.write_spread(w, defaults) or_return
+weasel.write_spread(w, overrides) or_return
+weasel.write_raw_string(w, ">") or_return
+weasel.write_raw_string(w, "</div>") or_return

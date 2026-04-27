@@ -26,6 +26,7 @@ c3_driver :: proc() -> Host_Driver {
 		emit_children_close      = _c3_emit_children_close,
 		emit_component_call_close = _c3_emit_component_call_close,
 		emit_epilogue            = _c3_emit_epilogue,
+		emit_spread              = _c3_emit_spread,
 		preamble_marker          = "module ",
 	}
 }
@@ -135,4 +136,13 @@ _c3_emit_component_call_close :: proc(e: ^_Emitter) {
 @(private = "package")
 _c3_emit_epilogue :: proc(e: ^_Emitter) {
 	_write(e, "}\n")
+}
+
+@(private = "package")
+_c3_emit_spread :: proc(w_param, expr: string, e: ^_Emitter) {
+	_write(e, "weasel::write_spread(")
+	_write(e, w_param)
+	_write(e, ", ")
+	_write(e, expr)
+	_write(e, ")!\n")
 }

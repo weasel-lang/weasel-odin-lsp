@@ -37,6 +37,9 @@ Token_Kind :: enum u8 {
 	Expr_Open,
 	// `)` closing a preceding Expr_Open; value empty, pos = position of `)`
 	Expr_Close,
+	// `$(...expr)` standalone spread in element attribute position;
+	// value = raw inner expression (no $(...) delimiters), extra empty
+	Attr_Spread,
 	// `{block}` in element content; value = raw inner block (no braces)
 	Block_Open,
 	// `}` closing a preceding Block_Open; value empty, pos = position of `}`
@@ -59,6 +62,7 @@ Position :: struct {
 //   Element_Open / Close      →  value = tag name
 //   Attr_Static               →  value = attr name,  extra = string value (no quotes)
 //   Attr_Dynamic              →  value = attr name,  extra = expression   (no braces)
+//   Attr_Spread               →  value = raw spread expression (no $(...) delimiters), extra empty
 //   Expr_Open                 →  value = inner expression (no $( or ))
 //   Expr_Close                →  value empty; pos = position of the closing )
 //   Block_Open                →  value = inner block text (no { or })
@@ -347,20 +351,20 @@ _scan_brace_block :: proc(
 	return
 }
 
-// Scan a paren-delimited expression `$(…)` inside an element body.
-// Called when the scanner is positioned at '(' (the '$' has already been consumed).
-// Returns the raw inner content and the Position of the closing ')'.
-// Handles nested parentheses, strings, rune literals, and comments.
+// _scan_paren_content scans from the current position (already past the opening
+// '(') at depth 1 to the matching closing ')'.  Handles nested parentheses,
+// double-quoted strings, raw (backtick) strings, rune literals, and comments.
+// Returns the raw inner text and the Position of the closing ')'.
 @(private = "file")
-_scan_paren_expr :: proc(
+_scan_paren_content :: proc(
 	s: ^_Scanner,
 	errs: ^[dynamic]Scan_Error,
+	unterminated_msg: string,
 ) -> (
 	inner: string,
 	close_pos: Position,
 ) {
 	pos := _pos(s)
-	_advance(s) // consume '('
 	start := s.offset
 	depth := 1
 	outer: for s.offset < len(s.src) {
@@ -421,11 +425,27 @@ _scan_paren_expr :: proc(
 	}
 	inner = s.src[start:s.offset]
 	if depth != 0 {
-		append(errs, Scan_Error{"unterminated expression", pos})
+		append(errs, Scan_Error{unterminated_msg, pos})
 	} else {
 		_advance(s) // consume closing ')'
 	}
 	return
+}
+
+// Scan a paren-delimited expression `$(…)` inside an element body.
+// Called when the scanner is positioned at '(' (the '$' has already been consumed).
+// Returns the raw inner content and the Position of the closing ')'.
+// Handles nested parentheses, strings, rune literals, and comments.
+@(private = "file")
+_scan_paren_expr :: proc(
+	s: ^_Scanner,
+	errs: ^[dynamic]Scan_Error,
+) -> (
+	inner: string,
+	close_pos: Position,
+) {
+	_advance(s) // consume '('
+	return _scan_paren_content(s, errs, "unterminated expression")
 }
 
 // Append a Host_Text token for src[start:end] if the span is non-empty.
@@ -472,6 +492,33 @@ _scan_element_open :: proc(
 		case ch == 0:
 			append(errs, Scan_Error{"unexpected EOF inside element opening tag", _pos(s)})
 			return false
+
+		case ch == '$':
+			// Spread attribute: $(...expr) — no attribute name prefix.
+			spread_pos := _pos(s)
+			if _peek_next(s) != '(' ||
+			   s.offset + 4 >= len(s.src) ||
+			   s.src[s.offset + 2] != '.' ||
+			   s.src[s.offset + 3] != '.' ||
+			   s.src[s.offset + 4] != '.' {
+				append(
+					errs,
+					Scan_Error{"expected '$(...' for spread attribute", _pos(s)},
+				)
+				for s.offset < len(s.src) {
+					c := s.src[s.offset]
+					if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' {break}
+					_advance(s)
+				}
+				continue
+			}
+			_advance(s) // $
+			_advance(s) // (
+			_advance(s) // .
+			_advance(s) // .
+			_advance(s) // .
+			inner, _ := _scan_paren_content(s, errs, "unterminated spread expression")
+			append(tokens, Token{kind = .Attr_Spread, value = inner, pos = spread_pos})
 
 		case _is_name_start(ch):
 			// Attribute name: [a-zA-Z0-9_\-:]+
@@ -597,6 +644,7 @@ _scan_element_close :: proc(s: ^_Scanner, tokens: ^[dynamic]Token, errs: ^[dynam
 //   • Element_Open — followed by Attr* tokens; ended by Self_Close or first non-Attr token
 //   • Attr_Static  — value = name,  extra = unquoted string value
 //   • Attr_Dynamic — value = name,  extra = raw expression (without surrounding braces)
+//   • Attr_Spread  — value = raw spread expression (no $(...) delimiters), extra empty
 //   • Self_Close   — closes the immediately preceding Element_Open
 //   • Expr_Open    — value = inner expression of $(…) (no delimiters); always followed by Expr_Close
 //   • Expr_Close   — pos = position of the closing ')'; value empty
