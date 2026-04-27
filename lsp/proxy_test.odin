@@ -29,6 +29,7 @@ _test_proxy_init :: proc(tp: ^_Test_Proxy) {
 		&tp.proxy,
 		bytes.buffer_to_stream(&tp.ols_buf),
 		bytes.buffer_to_stream(&tp.editor_buf),
+		odin_proxy_options(),
 	)
 }
 

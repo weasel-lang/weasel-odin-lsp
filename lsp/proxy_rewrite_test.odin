@@ -32,6 +32,7 @@ _init :: proc(tp: ^_TR_Test) {
 		&tp.proxy,
 		bytes.buffer_to_stream(&tp.ols_buf),
 		bytes.buffer_to_stream(&tp.editor_buf),
+		odin_proxy_options(),
 	)
 }
 
@@ -383,13 +384,13 @@ test_rewriter_walks_position_range_and_uri :: proc(t: ^testing.T) {
 	}
 	defer transpiler.source_map_destroy(&sm)
 	append(&sm.entries, transpiler.Span_Entry{
-		odin_start   = {offset = 0, line = 1, col = 1},
-		odin_end     = {offset = 5, line = 1, col = 6},
+		host_start   = {offset = 0, line = 1, col = 1},
+		host_end     = {offset = 5, line = 1, col = 6},
 		weasel_start = {offset = 0, line = 1, col = 1},
 		weasel_end   = {offset = 5, line = 1, col = 6},
 	})
 	slice.sort_by(sm.entries[:], proc(a, b: transpiler.Span_Entry) -> bool {
-		return a.odin_start.offset < b.odin_start.offset
+		return a.host_start.offset < b.host_start.offset
 	})
 	tr := translator_make(&sm)
 	defer translator_destroy(&tr)
@@ -444,8 +445,8 @@ test_rewriter_nulls_unmappable_position :: proc(t: ^testing.T) {
 	sm := transpiler.Source_Map{entries = make([dynamic]transpiler.Span_Entry, 0, 1)}
 	defer transpiler.source_map_destroy(&sm)
 	append(&sm.entries, transpiler.Span_Entry{
-		odin_start   = {offset = 0, line = 1, col = 1},
-		odin_end     = {offset = 5, line = 1, col = 6},
+		host_start   = {offset = 0, line = 1, col = 1},
+		host_end     = {offset = 5, line = 1, col = 6},
 		weasel_start = {offset = 0, line = 1, col = 1},
 		weasel_end   = {offset = 5, line = 1, col = 6},
 	})

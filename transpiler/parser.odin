@@ -2,14 +2,14 @@
 	Weasel recursive descent parser.
 
 	Consumes the token stream produced by scan() and returns a minimal AST.
-	Weasel elements become typed nodes; Odin spans are preserved verbatim as
-	Odin_Span leaf nodes.
+	Weasel elements become typed nodes; host spans are preserved verbatim as
+	Host_Span leaf nodes.
 
 	Node kinds:
-	  Odin_Span     — verbatim Odin passthrough text
+	  Host_Span     — verbatim host passthrough text
 	  Expr_Node     — {expr} interpolation (HTML-escaped output)
 	  Element_Node  — raw HTML element or component proc call
-	  Odin_Block    — control-flow block (for/if/when/switch) containing elements
+	  Host_Block    — control-flow block (for/if/when/switch) containing elements
 	  Template_Proc — top-level Weasel template function declaration
 */
 package transpiler
@@ -21,7 +21,7 @@ import "core:strings"
 // AST node types
 // ---------------------------------------------------------------------------
 
-// Attr is a single element attribute.
+// Attr is a single named element attribute.
 //   Boolean   (e.g. `disabled`)      — name set, value and expr empty
 //   Static    (e.g. `class="card"`)  — name and value set, is_dynamic false
 //   Dynamic   (e.g. `class={cls}`)   — name and expr set,  is_dynamic true
@@ -33,8 +33,21 @@ Attr :: struct {
 	pos:        Position,
 }
 
-// Odin_Span carries verbatim Odin source emitted unchanged.
-Odin_Span :: struct {
+// Spread_Attr is a `$(...expr)` spread in element attribute position.
+// The expression is emitted verbatim; type correctness is enforced by the host compiler.
+Spread_Attr :: struct {
+	expr: string,
+	pos:  Position,
+}
+
+// Attr_Node is the sum type for element attributes: either a named Attr or a Spread_Attr.
+Attr_Node :: union {
+	Attr,
+	Spread_Attr,
+}
+
+// Host_Span carries verbatim host source emitted unchanged.
+Host_Span :: struct {
 	text: string,
 	pos:  Position,
 }
@@ -51,15 +64,15 @@ Expr_Node :: struct {
 Element_Node :: struct {
 	tag:      string,
 	kind:     Tag_Kind,
-	attrs:    [dynamic]Attr,
+	attrs:    [dynamic]Attr_Node,
 	children: [dynamic]Node,
 	pos:      Position,
 }
 
-// Odin_Block is a {…} code block whose body may contain nested Weasel elements.
-//   head — Odin text before the first inner '{', e.g. "for x in items "
+// Host_Block is a {…} code block whose body may contain nested Weasel elements.
+//   head — host text before the first inner '{', e.g. "for x in items "
 //   tail — "}" if an inner closing brace was found, or empty
-Odin_Block :: struct {
+Host_Block :: struct {
 	head:     string,
 	children: [dynamic]Node,
 	tail:     string,
@@ -70,7 +83,7 @@ Odin_Block :: struct {
 // has_slot is true when the body (recursively) contains a <slot /> element.
 //
 // Position fields:
-//   pos        — start of the enclosing Odin_Text token (unchanged legacy field)
+//   pos        — start of the enclosing Host_Text token (unchanged legacy field)
 //   name_pos   — start of the template name identifier in the .weasel source
 //   params_pos — start of the parameter list (byte after the opening '(')
 Template_Proc :: struct {
@@ -84,10 +97,10 @@ Template_Proc :: struct {
 }
 
 Node :: union {
-	Odin_Span,
+	Host_Span,
 	Expr_Node,
 	Element_Node,
-	Odin_Block,
+	Host_Block,
 	Template_Proc,
 }
 
@@ -104,7 +117,7 @@ _Parser :: struct {
 	tokens:      []Token,
 	pos:         int,
 	errs:        [dynamic]Parse_Error,
-	// pending holds the remainder of an Odin_Text token that was split
+	// pending holds the remainder of a Host_Text token that was split
 	// at a template boundary. Checked before reading from tokens.
 	pending:     string,
 	pending_pos: Position,
@@ -114,7 +127,7 @@ _Parser :: struct {
 @(private = "file")
 _pcur :: #force_inline proc(p: ^_Parser) -> Token {
 	if p.has_pending {
-		return Token{kind = .Odin_Text, value = p.pending, pos = p.pending_pos}
+		return Token{kind = .Host_Text, value = p.pending, pos = p.pending_pos}
 	}
 	if p.pos < len(p.tokens) {return p.tokens[p.pos]}
 	return Token{kind = .EOF}
@@ -123,7 +136,7 @@ _pcur :: #force_inline proc(p: ^_Parser) -> Token {
 @(private = "file")
 _padvance :: proc(p: ^_Parser) -> Token {
 	if p.has_pending {
-		t := Token{kind = .Odin_Text, value = p.pending, pos = p.pending_pos}
+		t := Token{kind = .Host_Text, value = p.pending, pos = p.pending_pos}
 		p.has_pending = false
 		return t
 	}
@@ -137,9 +150,9 @@ _perror :: proc(p: ^_Parser, msg: string, pos: Position) {
 	append(&p.errs, Parse_Error{msg, pos})
 }
 
-// _ppush_odin stores a remainder string to be returned as the next Odin_Text token.
+// _ppush_host stores a remainder string to be returned as the next Host_Text token.
 @(private = "file")
-_ppush_odin :: proc(p: ^_Parser, text: string, pos: Position) {
+_ppush_host :: proc(p: ^_Parser, text: string, pos: Position) {
 	if len(text) == 0 {return}
 	p.pending = text
 	p.pending_pos = pos
@@ -233,16 +246,16 @@ _Template_Decl :: struct {
 	params:     string,
 	prefix:     string, // Odin text before the declaration
 	suffix:     string, // Odin text after the opening '{'
-	// Byte offsets into the containing Odin_Text token's value, used by the
+	// Byte offsets into the containing Host_Text token's value, used by the
 	// caller to compute precise .weasel positions via advance_position.
 	name_off:   int,
 	params_off: int,
-	suffix_off: int, // byte offset of suffix within the Odin_Text token value
+	suffix_off: int, // byte offset of suffix within the Host_Text token value
 }
 
 // _find_template_decl searches text for "name :: template(params) {" and
 // returns its components. Handles nested parentheses in params.
-@(private = "file")
+@(private = "package")
 _find_template_decl :: proc(text: string) -> (decl: _Template_Decl, found: bool) {
 	marker := ":: template("
 	idx := strings.index(text, marker)
@@ -373,11 +386,11 @@ _has_slot :: proc(nodes: [dynamic]Node) -> bool {
 		case Element_Node:
 			if n.tag == "slot" {return true}
 			if _has_slot(n.children) {return true}
-		case Odin_Block:
+		case Host_Block:
 			if _has_slot(n.children) {return true}
 		case Template_Proc:
 			if _has_slot(n.body) {return true}
-		case Odin_Span, Expr_Node:
+		case Host_Span, Expr_Node:
 		}
 	}
 	return false
@@ -411,12 +424,12 @@ _parse_file :: proc(p: ^_Parser, allocator := context.allocator) -> [dynamic]Nod
 		case .EOF:
 			return nodes
 
-		case .Odin_Text:
+		case .Host_Text:
 			_padvance(p)
 			decl, found := _find_template_decl(tok.value)
 			if found {
 				if len(decl.prefix) > 0 {
-					append(&nodes, Odin_Span{text = decl.prefix, pos = tok.pos})
+					append(&nodes, Host_Span{text = decl.prefix, pos = tok.pos})
 				}
 				suffix_pos := advance_position(tok.pos, tok.value[:decl.suffix_off])
 				tp := _parse_template(p, decl, tok.pos, suffix_pos, allocator)
@@ -424,7 +437,7 @@ _parse_file :: proc(p: ^_Parser, allocator := context.allocator) -> [dynamic]Nod
 				tp.params_pos = advance_position(tok.pos, tok.value[:decl.params_off])
 				append(&nodes, tp)
 			} else {
-				append(&nodes, Odin_Span{text = tok.value, pos = tok.pos})
+				append(&nodes, Host_Span{text = tok.value, pos = tok.pos})
 			}
 
 		case .Element_Open:
@@ -463,23 +476,23 @@ _parse_template :: proc(
 
 	brace_depth := 1 // we consumed the opening '{'
 
-	// Process suffix (text after '{' in the header Odin_Text token).
+	// Process suffix (text after '{' in the header Host_Text token).
 	if len(decl.suffix) > 0 {
 		zero_at := -1
 		final := _brace_scan(decl.suffix, brace_depth, &zero_at)
 		if zero_at >= 0 {
 			// Entire template body fits in the suffix (no element tokens).
 			if zero_at > 0 {
-				append(&tp.body, Odin_Span{text = decl.suffix[:zero_at], pos = suffix_pos})
+				append(&tp.body, Host_Span{text = decl.suffix[:zero_at], pos = suffix_pos})
 			}
 			rest_pos := advance_position(suffix_pos, decl.suffix[:zero_at + 1])
-			_ppush_odin(p, decl.suffix[zero_at + 1:], rest_pos)
+			_ppush_host(p, decl.suffix[zero_at + 1:], rest_pos)
 			tp.has_slot = _has_slot(tp.body)
 			return tp
 		}
 		brace_depth = final
 		if len(decl.suffix) > 0 {
-			append(&tp.body, Odin_Span{text = decl.suffix, pos = suffix_pos})
+			append(&tp.body, Host_Span{text = decl.suffix, pos = suffix_pos})
 		}
 	}
 
@@ -492,21 +505,21 @@ _parse_template :: proc(
 			tp.has_slot = _has_slot(tp.body)
 			return tp
 
-		case .Odin_Text:
+		case .Host_Text:
 			_padvance(p)
 			zero_at := -1
 			final := _brace_scan(tok.value, brace_depth, &zero_at)
 			if zero_at >= 0 {
 				if zero_at > 0 {
-					append(&tp.body, Odin_Span{text = tok.value[:zero_at], pos = tok.pos})
+					append(&tp.body, Host_Span{text = tok.value[:zero_at], pos = tok.pos})
 				}
 				rest_pos := advance_position(tok.pos, tok.value[:zero_at + 1])
-				_ppush_odin(p, tok.value[zero_at + 1:], rest_pos)
+				_ppush_host(p, tok.value[zero_at + 1:], rest_pos)
 				tp.has_slot = _has_slot(tp.body)
 				return tp
 			}
 			brace_depth = final
-			append(&tp.body, Odin_Span{text = tok.value, pos = tok.pos})
+			append(&tp.body, Host_Span{text = tok.value, pos = tok.pos})
 
 		case .Element_Open:
 			elem := _parse_element(p, allocator)
@@ -548,7 +561,7 @@ _parse_element :: proc(p: ^_Parser, allocator := context.allocator) -> Element_N
 	elem := Element_Node{
 		tag      = open_tok.value,
 		kind     = resolve_tag(open_tok.value),
-		attrs    = make([dynamic]Attr, allocator),
+		attrs    = make([dynamic]Attr_Node, allocator),
 		children = make([dynamic]Node, allocator),
 		pos      = open_tok.pos,
 	}
@@ -559,10 +572,13 @@ _parse_element :: proc(p: ^_Parser, allocator := context.allocator) -> Element_N
 		#partial switch t.kind {
 		case .Attr_Static:
 			_padvance(p)
-			append(&elem.attrs, Attr{name = t.value, value = t.extra, pos = t.pos})
+			append(&elem.attrs, Attr_Node(Attr{name = t.value, value = t.extra, pos = t.pos}))
 		case .Attr_Dynamic:
 			_padvance(p)
-			append(&elem.attrs, Attr{name = t.value, expr = t.extra, is_dynamic = true, pos = t.pos})
+			append(&elem.attrs, Attr_Node(Attr{name = t.value, expr = t.extra, is_dynamic = true, pos = t.pos}))
+		case .Attr_Spread:
+			_padvance(p)
+			append(&elem.attrs, Attr_Node(Spread_Attr{expr = t.value, pos = t.pos}))
 		case .Self_Close:
 			_padvance(p)
 			return elem
@@ -604,10 +620,10 @@ _parse_children :: proc(
 			)
 			_padvance(p)
 
-		case .Odin_Text:
+		case .Host_Text:
 			_padvance(p)
 			if len(tok.value) > 0 {
-				append(out, Odin_Span{text = tok.value, pos = tok.pos})
+				append(out, Host_Span{text = tok.value, pos = tok.pos})
 			}
 
 		case .Element_Open:
@@ -636,7 +652,7 @@ _parse_children :: proc(
 // Block content parsing
 // ---------------------------------------------------------------------------
 
-// _parse_block_content parses a Block_Open token's inner text into an Odin_Block.
+// _parse_block_content parses a Block_Open token's inner text into a Host_Block.
 // The content is always treated as a code block (never an expression) — the $()
 // / {} distinction is now made at the lexer level.
 @(private = "file")
@@ -647,7 +663,7 @@ _parse_block_content :: proc(tok: Token, allocator := context.allocator) -> Node
 	brace_pos := _find_first_brace(expr)
 	if brace_pos < 0 {
 		// No inner brace — block contains only a head expression (e.g. a simple statement).
-		return Odin_Block{head = expr, children = make([dynamic]Node, allocator), tail = "", pos = tok.pos}
+		return Host_Block{head = expr, children = make([dynamic]Node, allocator), tail = "", pos = tok.pos}
 	}
 
 	head := expr[:brace_pos]
@@ -678,7 +694,7 @@ _parse_block_content :: proc(tok: Token, allocator := context.allocator) -> Node
 	children := make([dynamic]Node, allocator)
 	_parse_until_eof(&body_p, &children, allocator)
 
-	return Odin_Block{
+	return Host_Block{
 		head     = head,
 		children = children,
 		tail     = tail,
@@ -686,7 +702,7 @@ _parse_block_content :: proc(tok: Token, allocator := context.allocator) -> Node
 	}
 }
 
-// _parse_until_eof parses nodes into out until EOF (used for Odin_Block bodies).
+// _parse_until_eof parses nodes into out until EOF (used for Host_Block bodies).
 @(private = "file")
 _parse_until_eof :: proc(p: ^_Parser, out: ^[dynamic]Node, allocator := context.allocator) {
 	for {
@@ -695,10 +711,10 @@ _parse_until_eof :: proc(p: ^_Parser, out: ^[dynamic]Node, allocator := context.
 		case .EOF:
 			return
 
-		case .Odin_Text:
+		case .Host_Text:
 			_padvance(p)
 			if len(tok.value) > 0 {
-				append(out, Odin_Span{text = tok.value, pos = tok.pos})
+				append(out, Host_Span{text = tok.value, pos = tok.pos})
 			}
 
 		case .Element_Open:

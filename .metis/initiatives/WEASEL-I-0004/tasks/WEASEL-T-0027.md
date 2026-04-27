@@ -4,14 +4,14 @@ level: task
 title: "Wire config into CLI and LSP proxy (Proxy_Options for backend binary)"
 short_code: "WEASEL-T-0027"
 created_at: 2026-04-27T10:37:00.221560+00:00
-updated_at: 2026-04-27T10:37:00.221560+00:00
+updated_at: 2026-04-27T11:38:11.573777+00:00
 parent: WEASEL-I-0004
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -39,6 +39,10 @@ Load `.weasel.json` at startup in both `cmd/weasel-c/main.odin` and `cmd/weasel-
 - Introduce `Proxy_Options :: struct { lsp_binary: string, lsp_args: []string }`
 - Load binary name and args from config instead of hardcoding `"ols"`
 - Pass `Proxy_Options` to the proxy startup function
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 

@@ -157,7 +157,7 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 		return "", false
 	}
 
-	result, smap, transpile_errs := transpiler.transpile(nodes[:])
+	result, smap, transpile_errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
 	defer delete(transpile_errs)
 	defer transpiler.source_map_destroy(&smap)
 

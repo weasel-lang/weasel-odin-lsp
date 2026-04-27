@@ -1,21 +1,21 @@
 /*
 	Weasel transpiler.
 
-	Walks the AST produced by parse() and emits valid Odin source code.
-	Template_Proc nodes are rewritten to standard Odin proc declarations.
+	Walks the AST produced by parse() and emits valid host source code.
+	Template_Proc nodes are rewritten to host proc declarations.
 	Raw HTML elements become weasel.write_raw_string calls; inline
 	expressions become weasel.write_escaped_string calls.
 
 	Emission rules:
 	  Template_Proc  →  name :: proc(w: io.Writer[, params][, children]) -> io.Error { body }
-	  Odin_Span      →  verbatim (Odin context) OR raw-string write call (HTML context)
+	  Host_Span      →  verbatim (host context) OR raw-string write call (HTML context)
 	  Expr_Node      →  weasel.write_escaped_string(w, expr) or_return
 	  Element_Node   →  raw: open/close write calls  |  slot: children(w) or_return
-	  Odin_Block     →  head { children }
+	  Host_Block     →  head { children }
 
 	Context flag (in_html):
-	  false  — inside a template body or top-level: Odin_Span is verbatim Odin source
-	  true   — inside element children or Odin_Block children: Odin_Span is HTML text
+	  false  — inside a template body or top-level: Host_Span is verbatim host source
+	  true   — inside element children or Host_Block children: Host_Span is HTML text
 	           content and must be emitted as a weasel.write_raw_string call
 
 	Source map:
@@ -41,21 +41,23 @@ Transpile_Error :: struct {
 // builder, the running cursor used to compute odin-side span endpoints, the
 // source map being populated, the error sink, and the same-file template
 // signature table used to validate component calls.
-@(private = "file")
+@(private = "package")
 _Emitter :: struct {
-	sb:    ^strings.Builder,
-	pos:   Position,
-	smap:  ^Source_Map,
-	errs:  ^[dynamic]Transpile_Error,
-	known: map[string]bool,
+	sb:     ^strings.Builder,
+	pos:    Position,
+	smap:   ^Source_Map,
+	errs:   ^[dynamic]Transpile_Error,
+	known:  map[string]bool,
+	driver: Host_Driver,
 }
 
-// transpile converts a parsed AST into Odin source code and an accompanying
+// transpile converts a parsed AST into host source code and an accompanying
 // Source_Map.  Caller owns the returned string (free with
 // delete(transmute([]u8)source)), the map's entries
 // (source_map_destroy(&smap)), and the error slice.
 transpile :: proc(
 	nodes: []Node,
+	options: Transpile_Options,
 	allocator := context.allocator,
 ) -> (source: string, smap: Source_Map, errs: [dynamic]Transpile_Error) {
 	errs         = make([dynamic]Transpile_Error, allocator)
@@ -73,11 +75,12 @@ transpile :: proc(
 	}
 
 	e := _Emitter{
-		sb    = &sb,
-		pos   = Position{offset = 0, line = 1, col = 1},
-		smap  = &smap,
-		errs  = &errs,
-		known = known,
+		sb     = &sb,
+		pos    = Position{offset = 0, line = 1, col = 1},
+		smap   = &smap,
+		errs   = &errs,
+		known  = known,
+		driver = options.driver,
 	}
 
 	for node in nodes {
@@ -87,29 +90,34 @@ transpile :: proc(
 	_sort_entries(&smap)
 	source = strings.to_string(sb)
 
-	// If any Template_Proc was emitted, the output references io.Writer and
-	// io.Error. Inject `import "core:io"` automatically unless the Weasel
-	// source already contains it (so the developer never has to add it).
-	needs_io_import := false
-	has_io_import   := false
-	for node in nodes {
-		switch n in node {
-		case Template_Proc:
-			needs_io_import = true
-		case Odin_Span:
-			if strings.contains(n.text, "core:io") {
-				has_io_import = true
-			}
-		case Expr_Node, Element_Node, Odin_Block:
-			// These cannot carry import declarations.
+	// Inject the preamble when the AST contains at least one Template_Proc and
+	// options.preamble is non-empty.  Without a template proc the output needs
+	// no driver-specific imports.  The preamble is inserted:
+	//   • after the first line that begins with options.driver.preamble_marker
+	//     (e.g. "package " for Odin) when that prefix is present, or
+	//   • at offset 0 (prepended) when the source starts with something else.
+	// Source map entries whose host offsets fall at or after the injection point
+	// are shifted by the injected byte count and line count.
+	// Check whether any preamble line is already present (passthrough from the
+	// Weasel source), to avoid duplicating imports the user wrote explicitly.
+	preamble_present := false
+	for line in options.preamble {
+		if strings.contains(source, line) {
+			preamble_present = true
+			break
 		}
 	}
-	if needs_io_import && !has_io_import {
-		inject      := "import \"core:io\"\nimport \"lib:weasel\"\n"
-		inject_len  := len(inject)
-		inject_lines := 2 // number of newlines in inject
-		inject_at   := 0
-		if strings.has_prefix(source, "package ") {
+	if len(options.preamble) > 0 && len(known) > 0 && !preamble_present {
+		inject_sb := strings.builder_make(allocator)
+		for line in options.preamble {
+			strings.write_string(&inject_sb, line)
+			strings.write_byte(&inject_sb, '\n')
+		}
+		inject       := strings.to_string(inject_sb)
+		inject_len   := len(inject)
+		inject_lines := len(options.preamble)
+		inject_at    := 0
+		if len(options.driver.preamble_marker) > 0 && strings.has_prefix(source, options.driver.preamble_marker) {
 			if nl := strings.index(source, "\n"); nl >= 0 {
 				inject_at = nl + 1
 			}
@@ -117,14 +125,14 @@ transpile :: proc(
 
 		// Adjust source map entries displaced by the injected lines.
 		for &entry in smap.entries {
-			if entry.odin_start.offset >= inject_at {
-				entry.odin_start.offset += inject_len
-				entry.odin_start.line   += inject_lines
-				entry.odin_end.offset   += inject_len
-				entry.odin_end.line     += inject_lines
-			} else if entry.odin_end.offset > inject_at {
-				entry.odin_end.offset += inject_len
-				entry.odin_end.line   += inject_lines
+			if entry.host_start.offset >= inject_at {
+				entry.host_start.offset += inject_len
+				entry.host_start.line   += inject_lines
+				entry.host_end.offset   += inject_len
+				entry.host_end.line     += inject_lines
+			} else if entry.host_end.offset > inject_at {
+				entry.host_end.offset += inject_len
+				entry.host_end.line   += inject_lines
 			}
 		}
 
@@ -144,14 +152,14 @@ transpile :: proc(
 // ---------------------------------------------------------------------------
 
 // _write appends s to the output and advances the cursor.
-@(private = "file")
+@(private = "package")
 _write :: proc(e: ^_Emitter, s: string) {
 	strings.write_string(e.sb, s)
 	e.pos = advance_position(e.pos, s)
 }
 
 // _write_byte appends one byte to the output and advances the cursor.
-@(private = "file")
+@(private = "package")
 _write_byte :: proc(e: ^_Emitter, b: byte) {
 	strings.write_byte(e.sb, b)
 	e.pos.offset += 1
@@ -169,7 +177,7 @@ _write_byte :: proc(e: ^_Emitter, b: byte) {
 // preserved verbatim), but callers may pass a different string when the
 // Weasel source bytes differ from the emitted bytes (e.g. a tag name emitted
 // as an identifier call).
-@(private = "file")
+@(private = "package")
 _write_tracked :: proc(e: ^_Emitter, s: string, weasel_start: Position, s_weasel: string = "") {
 	start := e.pos
 	_write(e, s)
@@ -177,8 +185,8 @@ _write_tracked :: proc(e: ^_Emitter, s: string, weasel_start: Position, s_weasel
 	append(
 		&e.smap.entries,
 		Span_Entry{
-			odin_start   = start,
-			odin_end     = e.pos,
+			host_start   = start,
+			host_end     = e.pos,
 			weasel_start = weasel_start,
 			weasel_end   = advance_position(weasel_start, wstr),
 		},
@@ -206,11 +214,11 @@ _is_void_element :: proc(tag: string) -> bool {
 // ---------------------------------------------------------------------------
 
 // _write_string_literal_content writes s into the emitter with the minimal
-// escaping needed for it to be valid inside an Odin double-quoted string
-// literal.  No span entries are recorded: the content lives inside a
-// synthetic string literal in the generated Odin and is not a hoverable
-// identifier from the LSP's perspective.
-@(private = "file")
+// escaping needed for it to be valid inside a double-quoted string literal.
+// No span entries are recorded: the content lives inside a synthetic string
+// literal in the generated output and is not a hoverable identifier from the
+// LSP's perspective.
+@(private = "package")
 _write_string_literal_content :: proc(e: ^_Emitter, s: string) {
 	for i := 0; i < len(s); i += 1 {
 		switch s[i] {
@@ -234,35 +242,27 @@ _write_string_literal_content :: proc(e: ^_Emitter, s: string) {
 // Node emitters
 // ---------------------------------------------------------------------------
 
-// _emit_node dispatches on node type. in_html controls how Odin_Span nodes
+// _emit_node dispatches on node type. in_html controls how Host_Span nodes
 // are emitted: verbatim when false, as a raw-string write call when true.
 @(private = "file")
 _emit_node :: proc(e: ^_Emitter, node: Node, in_html: bool) {
 	switch n in node {
-	case Odin_Span:
+	case Host_Span:
 		if in_html {
-			// Text content inside an element: emit as a raw-string write call.
-			// The text itself lives inside the emitted string literal, so no
-			// identifier-level span is recorded.
-			_write(e, `weasel.write_raw_string(w, "`)
-			_write_string_literal_content(e, n.text)
-			_write(e, `") or_return`)
-			_write_byte(e, '\n')
+			// Text content inside an element: emit via driver raw-string write.
+			e.driver.emit_raw_string("w", n.text, e)
 		} else {
-			// Verbatim Odin passthrough: the whole span maps back to the
+			// Verbatim host passthrough: the whole span maps back to the
 			// originating .weasel byte range.
 			_write_tracked(e, n.text, n.pos)
 		}
 	case Expr_Node:
-		_write(e, "weasel.write_escaped_string(w, ")
-		// Expr_Node.pos is at the '$' of the $(…) delimiter; the expression
-		// bytes start two bytes later (after '$(').
-		_write_tracked(e, n.expr, advance_position(n.pos, "$("))
-		_write(e, ") or_return\n")
+		// Expr_Node.pos is at the '$' of the $(…) delimiter.
+		e.driver.emit_escaped_string("w", n.expr, n.pos, e)
 	case Element_Node:
 		_emit_element(e, n)
-	case Odin_Block:
-		_emit_odin_block(e, n)
+	case Host_Block:
+		_emit_host_block(e, n)
 	case Template_Proc:
 		_emit_template_proc(e, n)
 	}
@@ -277,31 +277,24 @@ _position_after_byte :: proc(p: Position) -> Position {
 
 @(private = "file")
 _emit_template_proc :: proc(e: ^_Emitter, n: Template_Proc) {
-	// name :: proc(w: io.Writer[, user-params][, children callback]) -> io.Error {
-	_write_tracked(e, n.name, n.name_pos)
-	_write(e, " :: proc(w: io.Writer")
-	if len(n.params) > 0 {
-		_write(e, ", ")
-		_write_tracked(e, n.params, n.params_pos)
-	}
-	if n.has_slot {
-		_write(e, ", children: proc(w: io.Writer) -> io.Error")
-	}
-	_write(e, ") -> io.Error {")
+	// Signature: name :: proc(w: Writer[, params][, children]) -> Error {
+	t := n
+	e.driver.emit_signature(&t, e)
 
-	// Template body is Odin context: Odin_Span nodes are verbatim source.
+	// Template body is host context: Host_Span nodes are verbatim source.
 	for node in n.body {
 		_emit_node(e, node, false)
 	}
 
-	_write(e, "return nil\n}\n")
+	e.driver.emit_epilogue(e)
 }
 
 @(private = "file")
 _emit_element :: proc(e: ^_Emitter, n: Element_Node) {
 	// <slot /> invokes the caller-supplied children callback.
 	if n.tag == "slot" {
-		_write(e, "children(w) or_return\n")
+		_write(e, "children(w")
+		e.driver.emit_component_call_close(e)
 		return
 	}
 	switch n.kind {
@@ -323,16 +316,15 @@ _emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 	// Open tag (with attributes).
 	_emit_open_tag(e, n.tag, n.attrs, false)
 
-	// Children are HTML context: Odin_Span nodes are text content.
+	// Children are HTML context: Host_Span nodes are text content.
 	for child in n.children {
 		_emit_node(e, child, true)
 	}
 
 	// Close tag.
-	_write(e, `weasel.write_raw_string(w, "</`)
-	_write(e, n.tag)
-	_write(e, `>") or_return`)
-	_write_byte(e, '\n')
+	close_tag := strings.concatenate({"</", n.tag, ">"})
+	defer delete(close_tag)
+	e.driver.emit_raw_string("w", close_tag, e)
 }
 
 // _emit_open_tag emits one or more write calls that together produce the element
@@ -340,9 +332,10 @@ _emit_raw_element :: proc(e: ^_Emitter, n: Element_Node) {
 // are folded into the raw-string literal; each dynamic attribute splits the
 // literal: the prefix up to and including the attribute name and opening quote
 // is flushed, then the expression is emitted via fmt.wprint, then accumulation
-// continues from the closing quote of the attribute value.
+// continues from the closing quote of the attribute value.  Each spread
+// attribute flushes whatever is pending then emits a write_spread call.
 @(private = "file")
-_emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_close: bool) {
+_emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr_Node, self_close: bool) {
 	// pending accumulates raw HTML text for the open tag.  It is flushed to
 	// the emitter as a weasel.write_raw_string call whenever a dynamic
 	// attribute is encountered (or at the very end).
@@ -353,30 +346,34 @@ _emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_clo
 	strings.write_byte(&pending, '<')
 	strings.write_string(&pending, tag)
 
-	for attr in attrs {
-		if attr.is_dynamic {
-			// Append ` name="` to pending, flush, then emit the expression.
-			strings.write_byte(&pending, ' ')
-			strings.write_string(&pending, attr.name)
-			strings.write_string(&pending, `="`)
-			_flush_pending(e, &pending)
-			_write(e, "fmt.wprint(w, ")
-			// attr.pos points at the attribute name; the expression is an
-			// Odin identifier emitted verbatim, so we track it with the
-			// best-available Weasel origin (the attribute as a whole).
-			_write_tracked(e, attr.expr, attr.pos)
-			_write(e, ")\n")
-			// Pending resumes from the closing quote of the attribute value.
-			strings.write_byte(&pending, '"')
-		} else {
-			// Static attribute: ` name="value"` or boolean ` name`.
-			strings.write_byte(&pending, ' ')
-			strings.write_string(&pending, attr.name)
-			if len(attr.value) > 0 {
+	for attr_node in attrs {
+		switch attr in attr_node {
+		case Attr:
+			if attr.is_dynamic {
+				// Append ` name="` to pending, flush, then emit the expression.
+				strings.write_byte(&pending, ' ')
+				strings.write_string(&pending, attr.name)
 				strings.write_string(&pending, `="`)
-				strings.write_string(&pending, attr.value)
+				_flush_pending(e, &pending)
+				// attr.pos points at the attribute name; the expression is an
+				// identifier emitted verbatim, tracked with the attribute origin.
+				e.driver.emit_dynamic_attr("w", attr.expr, attr.pos, e)
+				// Pending resumes from the closing quote of the attribute value.
 				strings.write_byte(&pending, '"')
+			} else {
+				// Static attribute: ` name="value"` or boolean ` name`.
+				strings.write_byte(&pending, ' ')
+				strings.write_string(&pending, attr.name)
+				if len(attr.value) > 0 {
+					strings.write_string(&pending, `="`)
+					strings.write_string(&pending, attr.value)
+					strings.write_byte(&pending, '"')
+				}
 			}
+		case Spread_Attr:
+			// Flush any accumulated static attrs, then emit the spread call.
+			_flush_pending(e, &pending)
+			e.driver.emit_spread("w", attr.expr, e)
 		}
 	}
 
@@ -389,17 +386,13 @@ _emit_open_tag :: proc(e: ^_Emitter, tag: string, attrs: [dynamic]Attr, self_clo
 	_flush_pending(e, &pending)
 }
 
-// _flush_pending emits the current content of pending as a
-// weasel.write_raw_string call and resets the builder.  No-ops when pending
-// is empty.
+// _flush_pending emits the current content of pending as a raw-string write
+// call via the driver and resets the builder.  No-ops when pending is empty.
 @(private = "file")
 _flush_pending :: proc(e: ^_Emitter, pending: ^strings.Builder) {
 	content := strings.to_string(pending^)
 	if len(content) == 0 {return}
-	_write(e, `weasel.write_raw_string(w, "`)
-	_write_string_literal_content(e, content)
-	_write(e, `") or_return`)
-	_write_byte(e, '\n')
+	e.driver.emit_raw_string("w", content, e)
 	strings.builder_reset(pending)
 }
 
@@ -467,16 +460,23 @@ _emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 	_write_tracked(e, n.tag, tag_pos)
 	_write(e, "(w")
 
-	// Props struct argument (only when attributes are present).
-	if len(n.attrs) > 0 {
+	// Props struct argument (only when named attributes are present).
+	// Spread attrs on component calls are not yet supported and are skipped.
+	named_attrs := make([dynamic]Attr, context.temp_allocator)
+	for attr_node in n.attrs {
+		if attr, ok := attr_node.(Attr); ok {
+			append(&named_attrs, attr)
+		}
+	}
+	if len(named_attrs) > 0 {
 		_write(e, ", ")
 		_write_props_name(e, n.tag, tag_pos)
 		_write_byte(e, '{')
-		for i in 0 ..< len(n.attrs) {
+		for i in 0 ..< len(named_attrs) {
 			if i > 0 {
 				_write(e, ", ")
 			}
-			attr := n.attrs[i]
+			attr := named_attrs[i]
 			_write_tracked(e, attr.name, attr.pos)
 			_write(e, " = ")
 			if attr.is_dynamic {
@@ -492,24 +492,24 @@ _emit_component :: proc(e: ^_Emitter, n: Element_Node) {
 
 	// Anonymous proc callback (only when child nodes are present).
 	if has_children {
-		_write(e, ", proc(w: io.Writer) -> io.Error {\n")
+		e.driver.emit_children_open("w", e)
 		for child in n.children {
 			_emit_node(e, child, true)
 		}
-		_write(e, "return nil\n}")
+		e.driver.emit_children_close(e)
 	}
 
-	_write(e, ") or_return\n")
+	e.driver.emit_component_call_close(e)
 }
 
 @(private = "file")
-_emit_odin_block :: proc(e: ^_Emitter, n: Odin_Block) {
-	// Odin_Block.pos is at the opening '{' of the block; the head bytes
+_emit_host_block :: proc(e: ^_Emitter, n: Host_Block) {
+	// Host_Block.pos is at the opening '{' of the block; the head bytes
 	// (e.g. "for x in items ") begin one byte later.
 	_write_tracked(e, n.head, _position_after_byte(n.pos))
 	_write_byte(e, '{')
 	_write_byte(e, '\n')
-	// Odin_Block children are in Odin context: Odin_Span nodes (e.g. case labels,
+	// Host_Block children are in host context: Host_Span nodes (e.g. case labels,
 	// comments) are emitted verbatim.  Element_Node children emit their own HTML
 	// write calls regardless of the in_html flag.
 	for child in n.children {

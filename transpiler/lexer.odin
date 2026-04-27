@@ -2,10 +2,10 @@
 	Weasel lexer / scanner.
 
 	Reads a .weasel source file and produces a flat token stream, distinguishing
-	Odin passthrough spans from Weasel element boundaries.
+	host passthrough spans from Weasel element boundaries.
 
 	State machine:
-	  - depth == 0  →  Odin passthrough mode: accumulate OdinText until <[a-z_]
+	  - depth == 0  →  host passthrough mode: accumulate HostText until <[a-z_]
 	  - depth  > 0  →  Element-content mode:
 	                     $(…)  becomes Expr_Open (value=inner) + Expr_Close
 	                     {…}   becomes Block_Open (value=inner) + Block_Close
@@ -23,8 +23,8 @@ import "core:fmt"
 // Token_Kind enumerates all lexical token types produced by scan().
 Token_Kind :: enum u8 {
 	EOF,
-	// Verbatim Odin source (passthrough region or element text content)
-	Odin_Text,
+	// Verbatim host source (passthrough region or element text content)
+	Host_Text,
 	// `<tagname` — opening of an element; value = tag name
 	Element_Open,
 	// `</tagname>` — closing tag; value = tag name
@@ -37,6 +37,9 @@ Token_Kind :: enum u8 {
 	Expr_Open,
 	// `)` closing a preceding Expr_Open; value empty, pos = position of `)`
 	Expr_Close,
+	// `$(...expr)` standalone spread in element attribute position;
+	// value = raw inner expression (no $(...) delimiters), extra empty
+	Attr_Spread,
 	// `{block}` in element content; value = raw inner block (no braces)
 	Block_Open,
 	// `}` closing a preceding Block_Open; value empty, pos = position of `}`
@@ -55,10 +58,11 @@ Position :: struct {
 // Token is a single lexical unit produced from a .weasel source file.
 //
 // Field meanings by token kind:
-//   Odin_Text                 →  value = verbatim source text
+//   Host_Text                 →  value = verbatim source text
 //   Element_Open / Close      →  value = tag name
 //   Attr_Static               →  value = attr name,  extra = string value (no quotes)
 //   Attr_Dynamic              →  value = attr name,  extra = expression   (no braces)
+//   Attr_Spread               →  value = raw spread expression (no $(...) delimiters), extra empty
 //   Expr_Open                 →  value = inner expression (no $( or ))
 //   Expr_Close                →  value empty; pos = position of the closing )
 //   Block_Open                →  value = inner block text (no { or })
@@ -347,20 +351,20 @@ _scan_brace_block :: proc(
 	return
 }
 
-// Scan a paren-delimited expression `$(…)` inside an element body.
-// Called when the scanner is positioned at '(' (the '$' has already been consumed).
-// Returns the raw inner content and the Position of the closing ')'.
-// Handles nested parentheses, strings, rune literals, and comments.
+// _scan_paren_content scans from the current position (already past the opening
+// '(') at depth 1 to the matching closing ')'.  Handles nested parentheses,
+// double-quoted strings, raw (backtick) strings, rune literals, and comments.
+// Returns the raw inner text and the Position of the closing ')'.
 @(private = "file")
-_scan_paren_expr :: proc(
+_scan_paren_content :: proc(
 	s: ^_Scanner,
 	errs: ^[dynamic]Scan_Error,
+	unterminated_msg: string,
 ) -> (
 	inner: string,
 	close_pos: Position,
 ) {
 	pos := _pos(s)
-	_advance(s) // consume '('
 	start := s.offset
 	depth := 1
 	outer: for s.offset < len(s.src) {
@@ -421,18 +425,34 @@ _scan_paren_expr :: proc(
 	}
 	inner = s.src[start:s.offset]
 	if depth != 0 {
-		append(errs, Scan_Error{"unterminated expression", pos})
+		append(errs, Scan_Error{unterminated_msg, pos})
 	} else {
 		_advance(s) // consume closing ')'
 	}
 	return
 }
 
-// Append an Odin_Text token for src[start:end] if the span is non-empty.
+// Scan a paren-delimited expression `$(…)` inside an element body.
+// Called when the scanner is positioned at '(' (the '$' has already been consumed).
+// Returns the raw inner content and the Position of the closing ')'.
+// Handles nested parentheses, strings, rune literals, and comments.
 @(private = "file")
-_emit_odin_text :: proc(tokens: ^[dynamic]Token, src: string, start, end: int, pos: Position) {
+_scan_paren_expr :: proc(
+	s: ^_Scanner,
+	errs: ^[dynamic]Scan_Error,
+) -> (
+	inner: string,
+	close_pos: Position,
+) {
+	_advance(s) // consume '('
+	return _scan_paren_content(s, errs, "unterminated expression")
+}
+
+// Append a Host_Text token for src[start:end] if the span is non-empty.
+@(private = "file")
+_emit_host_text :: proc(tokens: ^[dynamic]Token, src: string, start, end: int, pos: Position) {
 	if end > start {
-		append(tokens, Token{kind = .Odin_Text, value = src[start:end], pos = pos})
+		append(tokens, Token{kind = .Host_Text, value = src[start:end], pos = pos})
 	}
 }
 
@@ -472,6 +492,33 @@ _scan_element_open :: proc(
 		case ch == 0:
 			append(errs, Scan_Error{"unexpected EOF inside element opening tag", _pos(s)})
 			return false
+
+		case ch == '$':
+			// Spread attribute: $(...expr) — no attribute name prefix.
+			spread_pos := _pos(s)
+			if _peek_next(s) != '(' ||
+			   s.offset + 4 >= len(s.src) ||
+			   s.src[s.offset + 2] != '.' ||
+			   s.src[s.offset + 3] != '.' ||
+			   s.src[s.offset + 4] != '.' {
+				append(
+					errs,
+					Scan_Error{"expected '$(...' for spread attribute", _pos(s)},
+				)
+				for s.offset < len(s.src) {
+					c := s.src[s.offset]
+					if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '>' {break}
+					_advance(s)
+				}
+				continue
+			}
+			_advance(s) // $
+			_advance(s) // (
+			_advance(s) // .
+			_advance(s) // .
+			_advance(s) // .
+			inner, _ := _scan_paren_content(s, errs, "unterminated spread expression")
+			append(tokens, Token{kind = .Attr_Spread, value = inner, pos = spread_pos})
 
 		case _is_name_start(ch):
 			// Attribute name: [a-zA-Z0-9_\-:]+
@@ -593,10 +640,11 @@ _scan_element_close :: proc(s: ^_Scanner, tokens: ^[dynamic]Token, errs: ^[dynam
 //
 // Token stream conventions:
 //
-//   • Odin_Text    — zero or more verbatim source characters (never empty)
+//   • Host_Text    — zero or more verbatim source characters (never empty)
 //   • Element_Open — followed by Attr* tokens; ended by Self_Close or first non-Attr token
 //   • Attr_Static  — value = name,  extra = unquoted string value
 //   • Attr_Dynamic — value = name,  extra = raw expression (without surrounding braces)
+//   • Attr_Spread  — value = raw spread expression (no $(...) delimiters), extra empty
 //   • Self_Close   — closes the immediately preceding Element_Open
 //   • Expr_Open    — value = inner expression of $(…) (no delimiters); always followed by Expr_Close
 //   • Expr_Close   — pos = position of the closing ')'; value empty
@@ -623,7 +671,7 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 
 		// ── Element open: `<[a-z_]` ─────────────────────────────────────────
 		if ch == '<' && _is_name_start(_peek_next(&s)) {
-			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+			_emit_host_text(&tokens, s.src, mark, s.offset, mark_pos)
 			self_closing := _scan_element_open(&s, &tokens, &errs)
 			if !self_closing {
 				depth += 1
@@ -635,7 +683,7 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 
 		// ── Element close: `</` ──────────────────────────────────────────────
 		if ch == '<' && _peek_next(&s) == '/' {
-			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+			_emit_host_text(&tokens, s.src, mark, s.offset, mark_pos)
 			_scan_element_close(&s, &tokens, &errs)
 			depth -= 1
 			if depth < 0 {depth = 0}
@@ -646,7 +694,7 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 
 		// ── Expression: `$(expr)` inside element content ─────────────────────
 		if ch == '$' && _peek_next(&s) == '(' && depth > 0 {
-			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+			_emit_host_text(&tokens, s.src, mark, s.offset, mark_pos)
 			expr_pos := _pos(&s)
 			_advance(&s) // consume '$'
 			inner, close_pos := _scan_paren_expr(&s, &errs)
@@ -659,7 +707,7 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 
 		// ── Code block: `{block}` inside element content ──────────────────────
 		if ch == '{' && depth > 0 {
-			_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+			_emit_host_text(&tokens, s.src, mark, s.offset, mark_pos)
 			block_pos := _pos(&s)
 			inner, close_pos := _scan_brace_block(&s, &errs)
 			append(&tokens, Token{kind = .Block_Open, value = inner, pos = block_pos})
@@ -673,7 +721,7 @@ scan :: proc(src: string, allocator := context.allocator) -> ([dynamic]Token, [d
 	}
 
 	// Flush any trailing Odin passthrough text.
-	_emit_odin_text(&tokens, s.src, mark, s.offset, mark_pos)
+	_emit_host_text(&tokens, s.src, mark, s.offset, mark_pos)
 	append(&tokens, Token{kind = .EOF, pos = _pos(&s)})
 	return tokens, errs
 }

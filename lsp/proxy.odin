@@ -91,6 +91,13 @@ Document :: struct {
 //   diagnostics never interleave frames with forwarded responses.
 //   `ols_writer` has a single writer (the editor→ols thread), so no
 //   mutex is needed there.
+// Proxy_Options configures a Proxy at initialisation time.  Passed to
+// proxy_init so callers can substitute a non-default host driver (e.g. for
+// C3 projects) without changing any call sites deeper inside the proxy.
+Proxy_Options :: struct {
+	transpile: transpiler.Transpile_Options,
+}
+
 Proxy :: struct {
 	documents: map[string]^Document,
 	// pending correlates request id (stringified via _pending_key) with
@@ -100,8 +107,9 @@ Proxy :: struct {
 	// right document's source map for a result.
 	pending: map[string]Pending_Request,
 
-	ols_writer:    io.Writer,
-	editor_writer: io.Writer,
+	ols_writer:      io.Writer,
+	editor_writer:   io.Writer,
+	transpile_opts:  transpiler.Transpile_Options,
 
 	state_mu:        sync.Mutex,
 	editor_write_mu: sync.Mutex,
@@ -118,11 +126,19 @@ Pending_Request :: struct {
 }
 
 // proxy_init prepares p.  The two writers must outlive the proxy.
-proxy_init :: proc(p: ^Proxy, ols_writer, editor_writer: io.Writer) {
-	p.documents = make(map[string]^Document)
-	p.pending = make(map[string]Pending_Request)
-	p.ols_writer = ols_writer
-	p.editor_writer = editor_writer
+// opts.transpile is used for all subsequent transpile calls; call
+// odin_proxy_options() to get Odin-default behaviour.
+proxy_init :: proc(p: ^Proxy, ols_writer, editor_writer: io.Writer, opts: Proxy_Options) {
+	p.documents      = make(map[string]^Document)
+	p.pending        = make(map[string]Pending_Request)
+	p.ols_writer     = ols_writer
+	p.editor_writer  = editor_writer
+	p.transpile_opts = opts.transpile
+}
+
+// odin_proxy_options returns Proxy_Options pre-populated with Odin defaults.
+odin_proxy_options :: proc() -> Proxy_Options {
+	return Proxy_Options{transpile = transpiler.odin_transpile_options()}
 }
 
 // proxy_destroy releases every Document still tracked by p.  Call after
@@ -540,7 +556,7 @@ _handle_did_open :: proc(p: ^Proxy, body: []u8, params: json.Object) -> Frame_Er
 	odin_uri, _ := weasel_uri_to_odin_uri(doc.weasel_uri)
 	doc.odin_uri = odin_uri
 
-	diags := _transpile_into(doc)
+	diags := _transpile_into(doc, p.transpile_opts)
 	defer _diagnostics_free(diags)
 
 	p.documents[doc.weasel_uri] = doc
@@ -585,7 +601,7 @@ _handle_did_change :: proc(p: ^Proxy, body: []u8, params: json.Object) -> Frame_
 	}
 	doc.version = version
 
-	diags := _transpile_into(doc)
+	diags := _transpile_into(doc, p.transpile_opts)
 	defer _diagnostics_free(diags)
 
 	if err := _send_did_change_to_ols(p, doc); err != .None {return err}
@@ -685,7 +701,7 @@ _diagnostics_free :: proc(diags: [dynamic]_Diagnostic) {
 // explicitly cloned into the outer allocator before the arena is
 // destroyed.
 @(private = "file")
-_transpile_into :: proc(doc: ^Document) -> [dynamic]_Diagnostic {
+_transpile_into :: proc(doc: ^Document, opts: transpiler.Transpile_Options) -> [dynamic]_Diagnostic {
 	outer_alloc := context.allocator
 	diags := make([dynamic]_Diagnostic, outer_alloc)
 
@@ -720,7 +736,7 @@ _transpile_into :: proc(doc: ^Document) -> [dynamic]_Diagnostic {
 		return diags
 	}
 
-	source, smap, terrs := transpiler.transpile(nodes[:])
+	source, smap, terrs := transpiler.transpile(nodes[:], opts)
 	for e in terrs {
 		append(&diags, _Diagnostic{message = strings.clone(e.message, outer_alloc), pos = e.pos})
 	}

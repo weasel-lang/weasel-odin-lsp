@@ -52,6 +52,7 @@ import "core:os"
 import "core:thread"
 
 import "../../lsp"
+import "../../transpiler"
 
 // _Editor_To_Ols drains framed editor messages through the proxy, which
 // handles `.weasel` lifecycle notifications and forwards everything else
@@ -138,7 +139,20 @@ _ols_to_editor_thread :: proc(data: rawptr) {
 }
 
 main :: proc() {
-	ols_path := "ols"
+	// Load .weasel.json from the working directory (walking upward).
+	// Failures to find a config are silent; defaults are used.
+	// These allocations live for the duration of the process; no defers needed
+	// since weasel-lsp exits via os.exit() when ols terminates.
+	cwd, _ := os.get_working_directory(context.allocator)
+	cfg, cfg_err := transpiler.load_config(cwd)
+	if cfg_err != .None {
+		fmt.eprintfln("weasel-lsp: warning: malformed .weasel.json — using Odin defaults")
+		cfg = transpiler.odin_default_weasel_config()
+	}
+
+	// Command-line --ols overrides the config's lsp_binary.
+	ols_path := cfg.lsp_binary if len(cfg.lsp_binary) > 0 else "ols"
+	ols_args  := cfg.lsp_args  // may be nil
 
 	i := 1
 
@@ -154,13 +168,20 @@ main :: proc() {
 			i += 2
 		case "-h", "--help":
 			fmt.println("Usage: weasel-lsp [--ols <path>]")
-			fmt.println("  --ols <path>   Path to the ols binary (default: 'ols' on PATH).")
+			fmt.println("  --ols <path>   Path to the ols binary (default from .weasel.json or 'ols').")
 			os.exit(0)
 		case:
 			fmt.eprintfln("weasel-lsp: unknown argument '%s'", a)
 			fmt.eprintln("Usage: weasel-lsp [--ols <path>]")
 			os.exit(2)
 		}
+	}
+
+	// Build the command: binary name followed by any extra args from config.
+	cmd := make([dynamic]string)
+	append(&cmd, ols_path)
+	for arg in ols_args {
+		append(&cmd, arg)
 	}
 
 	ols_stdin_r, ols_stdin_w, e1 := os.pipe()
@@ -176,7 +197,7 @@ main :: proc() {
 	}
 
 	handle, spawn_err := os.process_start(os.Process_Desc{
-		command = []string{ols_path},
+		command = cmd[:],
 		stdin   = ols_stdin_r,
 		stdout  = ols_stdout_w,
 		stderr  = os.stderr,
@@ -193,7 +214,12 @@ main :: proc() {
 	// Shared proxy state: both threads consult the same document map and
 	// funnel editor-bound writes through the same mutex.
 	proxy: lsp.Proxy
-	lsp.proxy_init(&proxy, os.to_writer(ols_stdin_w), os.to_writer(os.stdout))
+	lsp.proxy_init(
+		&proxy,
+		os.to_writer(ols_stdin_w),
+		os.to_writer(os.stdout),
+		lsp.Proxy_Options{transpile = transpiler.config_to_transpile_options(cfg)},
+	)
 
 	// Block SIGTERM/SIGINT/SIGHUP in this thread (inherited by all threads
 	// started below) and forward any such signal to ols before exiting.

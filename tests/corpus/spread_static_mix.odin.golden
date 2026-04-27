@@ -1,0 +1,4 @@
+weasel.write_raw_string(w, "<div class=\"p-2\"") or_return
+weasel.write_spread(w, p.attrs) or_return
+weasel.write_raw_string(w, " id=\"card\">") or_return
+weasel.write_raw_string(w, "</div>") or_return
