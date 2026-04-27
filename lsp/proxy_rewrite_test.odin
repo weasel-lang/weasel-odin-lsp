@@ -517,3 +517,50 @@ test_rewrite_hover_on_expr_position :: proc(t: ^testing.T) {
 	testing.expect_value(t, int(odin_line), 1)
 	testing.expect(t, int(odin_char) >= 31, "forwarded char should be inside the expression identifier")
 }
+
+// A completion request at the position immediately AFTER a $() expression
+// (cursor at the exclusive end of the span, e.g. "p.|" after typing "p.")
+// must still translate to a valid Odin position.  Before the fix, weasel_to_odin
+// returned false for the exclusive-end offset and the proxy forwarded null,
+// giving the editor no completions.
+@(test)
+test_rewrite_completion_at_expr_span_end :: proc(t: ^testing.T) {
+	tp: _TR_Test
+	_init(&tp)
+	defer _destroy(&tp)
+
+	// "<p>$(p.)</p>" — "p." is the expression.  "p" is at Weasel char 4,
+	// "." at char 5, so the exclusive end of the span is char 6 (0-indexed).
+	// A completion request at char 6 simulates the cursor right after "p.".
+	open := `{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/dot.weasel","languageId":"weasel","version":1,"text":"<p>$(p.)</p>"}}}`
+	proxy_process_editor_message(&tp.proxy, transmute([]u8)open)
+	bytes.buffer_reset(&tp.ols_buf)
+	bytes.buffer_reset(&tp.editor_buf)
+
+	// Completion at Weasel line 0, char 6 — exclusive end of the "p." span.
+	req := `{"jsonrpc":"2.0","id":88,"method":"textDocument/completion","params":{"textDocument":{"uri":"file:///tmp/dot.weasel"},"position":{"line":0,"character":6},"context":{"triggerKind":2,"triggerCharacter":"."}}}`
+	testing.expect_value(t, _send_editor_raw(&tp, req), Frame_Error.None)
+
+	ol, ok := _drain_one(&tp.ols_buf)
+	defer delete(ol)
+	testing.expect(t, ok, "proxy must forward the completion request to ols")
+
+	v, perr := json.parse(ol, parse_integers = true)
+	defer json.destroy_value(v)
+	testing.expect_value(t, perr, json.Error.None)
+
+	obj, _    := v.(json.Object)
+	params, _ := obj["params"].(json.Object)
+	pos_val   := params["position"]
+
+	// The position must not be null — before the fix it was json.Null.
+	_, is_null := pos_val.(json.Null)
+	testing.expect(t, !is_null, "forwarded position must not be null")
+
+	// It must point at the Odin-side end of "p." inside the write_escaped_string call.
+	pos, _ := pos_val.(json.Object)
+	line, _ := pos["line"].(json.Integer)
+	char, _ := pos["character"].(json.Integer)
+	testing.expect(t, int(line) >= 0, "forwarded line must be non-negative")
+	testing.expect(t, int(char) > 0, "forwarded char must be past the start of the line")
+}

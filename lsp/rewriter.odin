@@ -328,8 +328,15 @@ _translate_position :: proc(
 	pos := _lsp_to_transpiler_pos(_source_text(ctx.default_doc, ctx.dir), lsp_line, lsp_char)
 	switch ctx.dir {
 	case .Weasel_To_Odin:
-		return weasel_to_odin(&ctx.default_doc.translator, pos)
+		// Try the interior lookup first; fall back to the span-boundary variant
+		// so a cursor sitting at the exclusive end of a span (the common case when
+		// triggering completion after "p.") still resolves instead of returning null.
+		if got, ok := weasel_to_odin(&ctx.default_doc.translator, pos); ok {return got, true}
+		return weasel_to_odin_range_end(&ctx.default_doc.translator, pos)
 	case .Odin_To_Weasel:
+		// No range_end fallback here: response Range.end is already handled by
+		// _translate_range_end; a plain Position from ols that falls outside all
+		// spans genuinely has no Weasel origin and should be nulled.
 		return odin_to_weasel(&ctx.default_doc.translator, pos)
 	}
 	return {}, false
