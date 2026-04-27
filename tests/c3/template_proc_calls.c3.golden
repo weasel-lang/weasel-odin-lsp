@@ -1,0 +1,42 @@
+
+struct Task {
+    String		name;
+    String		description;
+    priority    u32;
+    due         u64;
+}
+
+struct Task_Item_Props {
+    task: ^Task,
+}
+
+template item(Task_Item_Props p) {
+    io::fwrite_str(w, "<h2>")!
+weasel::write_escaped(w, p.task.name)!
+io::fwrite_str(w, " &ndash; P")!
+weasel::write_escaped(w, p.task.prio)!
+io::fwrite_str(w, "</h2>")!
+
+    io::fwrite_str(w, "<p>")!
+weasel::write_escaped(w, p.task.description)!
+io::fwrite_str(w, "</p>")!
+
+}
+
+struct Task_List_Props {
+    []Task  tasks;
+}
+
+template list(Task_List_Props p) {
+    io::fwrite_str(w, "<ul>")!
+io::fwrite_str(w, "\n        ")!
+
+            foreach (task : p.tasks) {
+
+                item(w, Item_Props{task = task})!
+
+            }
+io::fwrite_str(w, "\n    ")!
+io::fwrite_str(w, "</ul>")!
+
+}

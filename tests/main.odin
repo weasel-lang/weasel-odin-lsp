@@ -1,18 +1,16 @@
 /*
 	Weasel corpus test runner.
 
-	Discovers all .weasel files under the corpus directory, runs each through the
-	full lexer → parser → transpiler pipeline, and diffs the result against the
-	corresponding .odin.golden file.
+	Discovers .weasel fixtures under per-language directories (tests/odin,
+	tests/c3, …), transpiles each with the matching driver, and diffs the
+	result against the corresponding golden file (.odin.golden, .c3.golden, …).
 
 	Usage:
-	  odin run tests/ -- [--update] [--corpus <dir>]
+	  odin run tests/ -- [--update] [--language <name>]
 
 	Flags:
-	  --update        Overwrite .odin.golden files with current transpiler output
-	                  instead of comparing.  Use this to snapshot new golden files
-	                  or after an intentional output change.
-	  --corpus <dir>  Path to the corpus directory (default: tests/corpus).
+	  --update             Overwrite golden files with current transpiler output.
+	  --language <name>    Run only the named language (odin, c3). Default: all.
 */
 package corpus_tests
 
@@ -24,72 +22,113 @@ import "core:strings"
 import "../transpiler"
 
 Args :: struct {
-	update: bool   `usage:"Overwrite .odin.golden files with current transpiler output."`,
-	corpus: string `usage:"Path to the corpus directory (default: tests/corpus)."`,
+	update:   bool   `usage:"Overwrite golden files with current transpiler output."`,
+	language: string `usage:"Run only this language (e.g. odin, c3). Default: all."`,
+}
+
+_Language :: struct {
+	name:       string,
+	dir:        string,
+	golden_ext: string,
+	options:    transpiler.Transpile_Options,
 }
 
 main :: proc() {
-	args := Args{corpus = "tests/corpus"}
+	args: Args
 	flags.parse_or_exit(&args, os.args, .Unix)
 
-	pattern := fmt.aprintf("%s/*.weasel", args.corpus)
-	defer delete(pattern)
-
-	paths, glob_err := filepath.glob(pattern)
-
-	if glob_err != nil {
-		fmt.eprintfln("error: cannot glob '%s'", pattern)
-		os.exit(1)
+	languages := [?]_Language{
+		{
+			name       = "odin",
+			dir        = "tests/odin",
+			golden_ext = ".odin.golden",
+			options    = transpiler.odin_transpile_options(),
+		},
+		{
+			name       = "c3",
+			dir        = "tests/c3",
+			golden_ext = ".c3.golden",
+			options    = transpiler.c3_transpile_options(),
+		},
 	}
-	defer {
+
+	total_pass, total_fail, total_updated := 0, 0, 0
+	langs_run := 0
+
+	for lang in languages {
+		if args.language != "" && args.language != lang.name {
+			continue
+		}
+
+		pattern := fmt.aprintf("%s/*.weasel", lang.dir)
+		paths, glob_err := filepath.glob(pattern)
+		delete(pattern)
+
+		if glob_err != nil || len(paths) == 0 {
+			for p in paths {delete(p)}
+			delete(paths)
+			if args.language != "" {
+				fmt.eprintfln("warning: no .weasel files found in '%s'", lang.dir)
+			}
+			continue
+		}
+
+		langs_run += 1
+		fmt.printfln("%s:", lang.name)
+		pass, fail, updated := 0, 0, 0
+
+		for weasel_path in paths {
+			ok := _run_fixture(weasel_path, lang, args.update)
+			switch {
+			case args.update && ok:
+				updated += 1
+			case !args.update && ok:
+				pass += 1
+			case:
+				fail += 1
+			}
+		}
+
 		for p in paths {delete(p)}
 		delete(paths)
+
+		if args.update {
+			fmt.printfln("  %d golden file(s) updated, %d failed", updated, fail)
+		} else {
+			fmt.printfln("  %d passed, %d failed", pass, fail)
+		}
+
+		total_pass    += pass
+		total_fail    += fail
+		total_updated += updated
 	}
 
-	if len(paths) == 0 {
-		fmt.eprintfln("warning: no .weasel files found in '%s'", args.corpus)
-	}
-
-	pass, fail, updated := 0, 0, 0
-
-	for weasel_path in paths {
-		ok := _run_fixture(weasel_path, args.update)
-		switch {
-		case args.update && ok:
-			updated += 1
-		case !args.update && ok:
-			pass += 1
-		case:
-			fail += 1
+	if langs_run > 1 {
+		if args.update {
+			fmt.printfln("total: %d updated, %d failed", total_updated, total_fail)
+		} else {
+			fmt.printfln("total: %d passed, %d failed", total_pass, total_fail)
 		}
 	}
 
-	if args.update {
-		fmt.printfln("corpus: %d golden file(s) updated, %d failed", updated, fail)
-	} else {
-		fmt.printfln("corpus: %d passed, %d failed", pass, fail)
-	}
-
-	if fail > 0 {
+	if total_fail > 0 {
 		os.exit(1)
 	}
 }
 
-// _run_fixture transpiles weasel_path and either compares or updates the golden file.
-// Returns true on success.
 @(private = "file")
-_run_fixture :: proc(weasel_path: string, update: bool) -> bool {
+_run_fixture :: proc(weasel_path: string, lang: _Language, update: bool) -> bool {
 	base := filepath.base(weasel_path)
 	dir  := filepath.dir(weasel_path)
 	defer delete(dir)
 
 	stem        := filepath.stem(base)
-	golden_name := strings.concatenate([]string{stem, ".odin.golden"})
+	golden_name := strings.concatenate([]string{stem, lang.golden_ext})
 	defer delete(golden_name)
 	golden_path, _ := filepath.join([]string{dir, golden_name}, context.allocator)
 	defer delete(golden_path)
 
-	output, ok := _transpile_file(weasel_path, base)
+	output, ok := _transpile_file(weasel_path, base, lang.options)
 	if !ok {return false}
 	defer delete(transmute([]u8)output)
 
@@ -122,10 +161,11 @@ _run_fixture :: proc(weasel_path: string, update: bool) -> bool {
 	return false
 }
 
-// _transpile_file runs the full pipeline on path and returns the emitted Odin source.
-// display_name is used in error messages.  Caller owns the returned string.
 @(private = "file")
-_transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool) {
+_transpile_file :: proc(
+	path, display_name: string,
+	options: transpiler.Transpile_Options,
+) -> (output: string, ok: bool) {
 	src_bytes, err := os.read_entire_file(path, context.allocator)
 	if err != nil {
 		fmt.eprintfln("FAIL  %s: read error: %v", display_name, err)
@@ -157,7 +197,7 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 		return "", false
 	}
 
-	result, smap, transpile_errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
+	result, smap, transpile_errs := transpiler.transpile(nodes[:], options)
 	defer delete(transpile_errs)
 	defer transpiler.source_map_destroy(&smap)
 
@@ -173,7 +213,6 @@ _transpile_file :: proc(path, display_name: string) -> (output: string, ok: bool
 	return result, true
 }
 
-// _print_diff prints up to 10 line-level differences between expected and got.
 @(private = "file")
 _print_diff :: proc(expected, got: string) {
 	exp_lines := strings.split_lines(expected)
@@ -181,10 +220,10 @@ _print_diff :: proc(expected, got: string) {
 	defer delete(exp_lines)
 	defer delete(got_lines)
 
-	n_exp  := len(exp_lines)
-	n_got  := len(got_lines)
-	limit  := max(n_exp, n_got)
-	shown  := 0
+	n_exp := len(exp_lines)
+	n_got := len(got_lines)
+	limit := max(n_exp, n_got)
+	shown := 0
 
 	for i in 0 ..< limit {
 		exp_line := exp_lines[i] if i < n_exp else ""

@@ -1,0 +1,4 @@
+io::fwrite_str(w, "<a href=\"/home\" class=\"nav\">")!
+io::fwrite_str(w, "Home")!
+io::fwrite_str(w, "</a>")!
+

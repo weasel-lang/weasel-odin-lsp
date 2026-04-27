@@ -2,6 +2,7 @@
 	C3 host driver.
 
 	Implements Host_Driver for the C3 language (https://c3-lang.org).
+
 	Key differences from the Odin driver:
 	  - Module declaration uses `module name;` (preamble_marker = "module ")
 	  - Functions declared as `fn void! name(OutStream* w, ...) { ... }`
@@ -14,20 +15,19 @@ package transpiler
 
 import "core:strings"
 
-// c3_driver returns a Host_Driver pre-populated with C3 behavior.
 c3_driver :: proc() -> Host_Driver {
 	return Host_Driver{
-		is_template_start        = _c3_is_template_start,
-		emit_signature           = _c3_emit_signature,
-		emit_dynamic_attr        = _c3_emit_dynamic_attr,
-		emit_raw_string          = _c3_emit_raw_string,
-		emit_escaped_string      = _c3_emit_escaped_string,
-		emit_children_open       = _c3_emit_children_open,
-		emit_children_close      = _c3_emit_children_close,
-		emit_component_call_close = _c3_emit_component_call_close,
-		emit_epilogue            = _c3_emit_epilogue,
-		emit_spread              = _c3_emit_spread,
-		preamble_marker          = "module ",
+		is_template_start           = _c3_is_template_start,
+		emit_signature              = _c3_emit_signature,
+		emit_dynamic_attr           = _c3_emit_dynamic_attr,
+		emit_raw_string             = _c3_emit_raw_string,
+		emit_escaped_string         = _c3_emit_escaped_string,
+		emit_children_open          = _c3_emit_children_open,
+		emit_children_close         = _c3_emit_children_close,
+		emit_component_call_close   = _c3_emit_component_call_close,
+		emit_epilogue               = _c3_emit_epilogue,
+		emit_spread                 = _c3_emit_spread,
+		preamble_marker             = "module ",
 	}
 }
 

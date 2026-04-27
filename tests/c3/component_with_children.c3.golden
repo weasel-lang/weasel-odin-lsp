@@ -1,0 +1,6 @@
+layout(w, fn void!(OutStream* w) {
+io::fwrite_str(w, "<p>")!
+weasel::write_escaped(w, msg)!
+io::fwrite_str(w, "</p>")!
+})!
+

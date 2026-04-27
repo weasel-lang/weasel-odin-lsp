@@ -9,11 +9,16 @@ Weasel is a JSX-style HTML templating extension for the Odin programming languag
 ## Commands
 
 ```sh
-# Run corpus (golden file) tests
+# Run corpus (golden file) tests — all languages
 odin run tests/
+
+# Run corpus tests for a single language
+odin run tests/ -- --language odin
+odin run tests/ -- --language c3
 
 # Update golden files after intentional output changes
 odin run tests/ -- --update
+odin run tests/ -- --update --language c3
 
 # Run unit tests for a module
 odin test transpiler/
@@ -56,8 +61,10 @@ The LSP layer is a proxy that sits between the editor and `ols` (the Odin Langua
 
 ### tests/
 
-- **tests/main.odin** — Corpus runner. Globs `tests/corpus/*.weasel`, transpiles each, diffs against the corresponding `.odin.golden`. Shows up to 10 line-level differences per file. `--update` overwrites golden files.
-- **tests/corpus/** — Fixture pairs: `feature.weasel` + `feature.odin.golden`. Golden files are right-trimmed (trailing blank lines removed).
+- **tests/main.odin** — Corpus runner. Iterates known language configs (`odin`, `c3`, …), globs `tests/<lang>/*.weasel`, transpiles each with the matching driver, and diffs against the corresponding golden file. Shows up to 10 line-level differences per file. `--update` overwrites golden files; `--language <name>` restricts to one language.
+- **tests/odin/** — Fixture pairs for Odin output: `feature.weasel` + `feature.odin.golden`.
+- **tests/c3/** — Fixture pairs for C3 output: `feature.weasel` + `feature.c3.golden`.
+- Golden files are right-trimmed (trailing blank lines removed). Adding a new language driver requires adding an entry to the `languages` array in `tests/main.odin`.
 
 ### runtime.odin
 
@@ -75,4 +82,4 @@ Defines `__weasel_write_escaped_string` (XSS-escapes `&`, `"`, `'`, `<`, `>`) an
 
 **Error collection** — Errors are appended to a slice rather than returned early, so multiple errors can be reported in one pass.
 
-**Adding a corpus fixture** — Create `tests/corpus/name.weasel`, run `odin run tests/ -- --update` to generate the `.odin.golden`, then commit both files.
+**Adding a corpus fixture** — Create `tests/<lang>/name.weasel`, run `odin run tests/ -- --update --language <lang>` to generate the golden file, then commit both files.

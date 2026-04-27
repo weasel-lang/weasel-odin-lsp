@@ -1,0 +1,5 @@
+io::fwrite_str(w, "<div")!
+weasel::write_spread(w, defaults)!
+weasel::write_spread(w, overrides)!
+io::fwrite_str(w, ">")!
+io::fwrite_str(w, "</div>")!

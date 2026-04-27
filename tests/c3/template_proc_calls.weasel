@@ -1,0 +1,30 @@
+
+struct Task {
+    String		name;
+    String		description;
+    priority    u32;
+    due         u64;
+}
+
+struct Task_Item_Props {
+    task: ^Task,
+}
+
+template item(Task_Item_Props p) {
+    <h2>$(p.task.name) &ndash; P$(p.task.prio)</h2>
+    <p>$(p.task.description)</p>
+}
+
+struct Task_List_Props {
+    []Task  tasks;
+}
+
+template list(Task_List_Props p) {
+    <ul>
+        {
+            foreach (task : p.tasks) {
+                <item task=$(task) />
+            }
+        }
+    </ul>
+}

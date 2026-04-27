@@ -1,0 +1,4 @@
+io::fwrite_str(w, "<div>")!
+io::fwrite_str(w, "Hello, world!")!
+io::fwrite_str(w, "</div>")!
+

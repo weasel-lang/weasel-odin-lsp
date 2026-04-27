@@ -1,0 +1,4 @@
+io::fwrite_str(w, "<div")!
+weasel::write_spread(w, p.attrs)!
+io::fwrite_str(w, ">")!
+io::fwrite_str(w, "</div>")!

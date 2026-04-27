@@ -1,0 +1,23 @@
+import std::io;
+import weasel;
+fn void! page(OutStream* w, p: ^Props) {
+io::fwrite_str(w, "<div class=\"content\">")!
+io::fwrite_str(w, "\n")!
+io::fwrite_str(w, "<h1>")!
+weasel::write_escaped(w, p.title)!
+io::fwrite_str(w, "</h1>")!
+io::fwrite_str(w, "\n")!
+io::fwrite_str(w, "<p>")!
+weasel::write_escaped(w, p.body)!
+io::fwrite_str(w, "</p>")!
+io::fwrite_str(w, "\n")!
+if p.show_footer {
+io::fwrite_str(w, "<footer>")!
+weasel::write_escaped(w, p.footer)!
+io::fwrite_str(w, "</footer>")!
+}
+io::fwrite_str(w, "\n")!
+io::fwrite_str(w, "</div>")!
+
+}
+

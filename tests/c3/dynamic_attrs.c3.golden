@@ -1,0 +1,5 @@
+io::fwrite_str(w, "<div id=\"")!
+io::fprint(w, eid)!
+io::fwrite_str(w, "\" class=\"box\">")!
+io::fwrite_str(w, "</div>")!
+

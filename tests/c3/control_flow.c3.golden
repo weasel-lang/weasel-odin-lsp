@@ -1,0 +1,27 @@
+io::fwrite_str(w, "<ul>")!
+for item in items {
+io::fwrite_str(w, "<li>")!
+weasel::write_escaped(w, item.name)!
+io::fwrite_str(w, "</li>")!
+}
+io::fwrite_str(w, "</ul>")!
+
+io::fwrite_str(w, "<div>")!
+if show {
+io::fwrite_str(w, "<span>")!
+io::fwrite_str(w, "visible")!
+io::fwrite_str(w, "</span>")!
+}
+io::fwrite_str(w, "</div>")!
+
+io::fwrite_str(w, "<div>")!
+switch kind {
+case .A: io::fwrite_str(w, "<em>")!
+io::fwrite_str(w, "Alpha")!
+io::fwrite_str(w, "</em>")!
+case .B: io::fwrite_str(w, "<em>")!
+io::fwrite_str(w, "Beta")!
+io::fwrite_str(w, "</em>")!
+}
+io::fwrite_str(w, "</div>")!
+

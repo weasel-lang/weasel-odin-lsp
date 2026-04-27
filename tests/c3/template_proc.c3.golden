@@ -1,0 +1,11 @@
+import std::io;
+import weasel;
+fn void! greet(OutStream* w, name: string) {
+io::fwrite_str(w, "<p>")!
+io::fwrite_str(w, "Hello, ")!
+weasel::write_escaped(w, name)!
+io::fwrite_str(w, "!")!
+io::fwrite_str(w, "</p>")!
+
+}
+
