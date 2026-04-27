@@ -4,14 +4,14 @@ level: initiative
 title: "Host Language Agnosticism"
 short_code: "WEASEL-I-0004"
 created_at: 2026-04-27T08:30:35.248868+00:00
-updated_at: 2026-04-27T11:06:44.952806+00:00
+updated_at: 2026-04-27T12:22:53.366210+00:00
 parent: WEASEL-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
