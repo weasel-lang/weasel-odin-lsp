@@ -6,7 +6,7 @@ import "core:testing"
 import "../transpiler"
 
 // _make_translator constructs a Source_Map from a literal slice of entries,
-// sorts it by odin_start.offset the way the transpiler does at the end of
+// sorts it by host_start.offset the way the transpiler does at the end of
 // emission, and wraps it in a Translator ready for translation queries.
 // Pair with the _destroy helper to free both the map and the reverse index.
 @(private = "file")
@@ -16,7 +16,7 @@ _make_translator :: proc(
 	sm.entries = make([dynamic]transpiler.Span_Entry, 0, len(entries))
 	for e in entries {append(&sm.entries, e)}
 	slice.sort_by(sm.entries[:], proc(a, b: transpiler.Span_Entry) -> bool {
-		return a.odin_start.offset < b.odin_start.offset
+		return a.host_start.offset < b.host_start.offset
 	})
 	t = translator_make(&sm)
 	return
@@ -37,8 +37,8 @@ _destroy :: proc(sm: ^transpiler.Source_Map, t: ^Translator) {
 test_translate_odin_to_weasel_exact_start :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 10, line = 2, col = 1},
-			odin_end     = {offset = 15, line = 2, col = 6},
+			host_start   = {offset = 10, line = 2, col = 1},
+			host_end     = {offset = 15, line = 2, col = 6},
 			weasel_start = {offset = 0,  line = 1, col = 1},
 			weasel_end   = {offset = 5,  line = 1, col = 6},
 		},
@@ -56,8 +56,8 @@ test_translate_odin_to_weasel_exact_start :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_exact_end_no_successor :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
@@ -74,14 +74,14 @@ test_translate_odin_to_weasel_exact_end_no_successor :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_exact_end_has_successor :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 100, line = 10, col = 1},
 			weasel_end   = {offset = 105, line = 10, col = 6},
 		},
 		{
-			odin_start   = {offset = 5,  line = 1, col = 6},
-			odin_end     = {offset = 10, line = 1, col = 11},
+			host_start   = {offset = 5,  line = 1, col = 6},
+			host_end     = {offset = 10, line = 1, col = 11},
 			weasel_start = {offset = 200, line = 20, col = 1},
 			weasel_end   = {offset = 205, line = 20, col = 6},
 		},
@@ -99,8 +99,8 @@ test_translate_odin_to_weasel_exact_end_has_successor :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_interior :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 20, line = 3, col = 5},
-			odin_end     = {offset = 25, line = 3, col = 10}, // "greet"
+			host_start   = {offset = 20, line = 3, col = 5},
+			host_end     = {offset = 25, line = 3, col = 10}, // "greet"
 			weasel_start = {offset = 0,  line = 1, col = 1},
 			weasel_end   = {offset = 5,  line = 1, col = 6},
 		},
@@ -119,14 +119,14 @@ test_translate_odin_to_weasel_interior :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_between :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
 		{
-			odin_start   = {offset = 20, line = 1, col = 21},
-			odin_end     = {offset = 30, line = 1, col = 31},
+			host_start   = {offset = 20, line = 1, col = 21},
+			host_end     = {offset = 30, line = 1, col = 31},
 			weasel_start = {offset = 10, line = 2, col = 1},
 			weasel_end   = {offset = 20, line = 2, col = 11},
 		},
@@ -142,8 +142,8 @@ test_translate_odin_to_weasel_between :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_before_first :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 10, line = 1, col = 11},
-			odin_end     = {offset = 15, line = 1, col = 16},
+			host_start   = {offset = 10, line = 1, col = 11},
+			host_end     = {offset = 15, line = 1, col = 16},
 			weasel_start = {offset = 0,  line = 1, col = 1},
 			weasel_end   = {offset = 5,  line = 1, col = 6},
 		},
@@ -159,8 +159,8 @@ test_translate_odin_to_weasel_before_first :: proc(t: ^testing.T) {
 test_translate_odin_to_weasel_after_last :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
@@ -188,8 +188,8 @@ test_translate_odin_to_weasel_multiline_passthrough :: proc(t: ^testing.T) {
 	// identical on both sides, so line/col deltas carry over unchanged.
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 8, line = 2, col = 1},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 8, line = 2, col = 1},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 8, line = 2, col = 1},
 		},
@@ -211,8 +211,8 @@ test_translate_odin_to_weasel_multiline_passthrough :: proc(t: ^testing.T) {
 test_translate_weasel_to_odin_exact_start :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 10, line = 2, col = 1},
-			odin_end     = {offset = 15, line = 2, col = 6},
+			host_start   = {offset = 10, line = 2, col = 1},
+			host_end     = {offset = 15, line = 2, col = 6},
 			weasel_start = {offset = 0,  line = 1, col = 1},
 			weasel_end   = {offset = 5,  line = 1, col = 6},
 		},
@@ -229,8 +229,8 @@ test_translate_weasel_to_odin_exact_start :: proc(t: ^testing.T) {
 test_translate_weasel_to_odin_exact_end_no_successor :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
@@ -248,8 +248,8 @@ test_translate_weasel_to_odin_interior :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
 			// Odin-side "Card_Props" at offset 100, col 11 — length 10.
-			odin_start   = {offset = 100, line = 5, col = 11},
-			odin_end     = {offset = 110, line = 5, col = 21},
+			host_start   = {offset = 100, line = 5, col = 11},
+			host_end     = {offset = 110, line = 5, col = 21},
 			// Weasel-side "card" at offset 1, col 2 — length 4.
 			weasel_start = {offset = 1, line = 1, col = 2},
 			weasel_end   = {offset = 5, line = 1, col = 6},
@@ -269,14 +269,14 @@ test_translate_weasel_to_odin_interior :: proc(t: ^testing.T) {
 test_translate_weasel_to_odin_between :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
 		{
-			odin_start   = {offset = 5,  line = 1, col = 6},
-			odin_end     = {offset = 10, line = 1, col = 11},
+			host_start   = {offset = 5,  line = 1, col = 6},
+			host_end     = {offset = 10, line = 1, col = 11},
 			weasel_start = {offset = 10, line = 2, col = 1},
 			weasel_end   = {offset = 15, line = 2, col = 6},
 		},
@@ -292,8 +292,8 @@ test_translate_weasel_to_odin_between :: proc(t: ^testing.T) {
 test_translate_weasel_to_odin_before_first :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0,  line = 1, col = 1},
-			odin_end     = {offset = 5,  line = 1, col = 6},
+			host_start   = {offset = 0,  line = 1, col = 1},
+			host_end     = {offset = 5,  line = 1, col = 6},
 			weasel_start = {offset = 10, line = 1, col = 11},
 			weasel_end   = {offset = 15, line = 1, col = 16},
 		},
@@ -309,8 +309,8 @@ test_translate_weasel_to_odin_before_first :: proc(t: ^testing.T) {
 test_translate_weasel_to_odin_after_last :: proc(t: ^testing.T) {
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 0, line = 1, col = 1},
-			odin_end     = {offset = 5, line = 1, col = 6},
+			host_start   = {offset = 0, line = 1, col = 1},
+			host_end     = {offset = 5, line = 1, col = 6},
 			weasel_start = {offset = 0, line = 1, col = 1},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
@@ -330,14 +330,14 @@ test_translate_weasel_to_odin_shared_weasel_origin :: proc(t: ^testing.T) {
 	// query at Weasel offset 2 must produce a position inside one of them.
 	sm, tr := _make_translator([]transpiler.Span_Entry{
 		{
-			odin_start   = {offset = 50,  line = 3, col = 1},
-			odin_end     = {offset = 54,  line = 3, col = 5},
+			host_start   = {offset = 50,  line = 3, col = 1},
+			host_end     = {offset = 54,  line = 3, col = 5},
 			weasel_start = {offset = 1, line = 1, col = 2},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
 		{
-			odin_start   = {offset = 100, line = 6, col = 1},
-			odin_end     = {offset = 110, line = 6, col = 11},
+			host_start   = {offset = 100, line = 6, col = 1},
+			host_end     = {offset = 110, line = 6, col = 11},
 			weasel_start = {offset = 1, line = 1, col = 2},
 			weasel_end   = {offset = 5, line = 1, col = 6},
 		},
@@ -368,7 +368,7 @@ test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
 	nodes, parse_errs := transpiler.parse(tokens[:])
 	defer delete(nodes)
 	defer delete(parse_errs)
-	out, smap, errs := transpiler.transpile(nodes[:])
+	out, smap, errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
 	defer {
 		delete(transmute([]u8)out)
 		transpiler.source_map_destroy(&smap)
@@ -398,7 +398,7 @@ test_translate_roundtrip_via_transpile :: proc(t: ^testing.T) {
 @(test)
 test_translate_template_body_odin_span :: proc(t: ^testing.T) {
 	// "x" sits at Weasel offset 23 (after "greet :: template() {\n").
-	// Before the fix, the suffix Odin_Span was given pos = token start
+	// Before the fix, the suffix Host_Span was given pos = token start
 	// (offset 0), so weasel_to_odin at offset 23 returned false.
 	src := "greet :: template() {\nx\n}"
 	tokens, scan_errs := transpiler.scan(src)
@@ -407,7 +407,7 @@ test_translate_template_body_odin_span :: proc(t: ^testing.T) {
 	nodes, parse_errs := transpiler.parse(tokens[:])
 	defer delete(nodes)
 	defer delete(parse_errs)
-	out, smap, errs := transpiler.transpile(nodes[:])
+	out, smap, errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
 	defer {
 		delete(transmute([]u8)out)
 		transpiler.source_map_destroy(&smap)
@@ -450,7 +450,7 @@ test_translate_roundtrip_expr_via_transpile :: proc(t: ^testing.T) {
 	nodes, parse_errs := transpiler.parse(tokens[:])
 	defer delete(nodes)
 	defer delete(parse_errs)
-	out, smap, errs := transpiler.transpile(nodes[:])
+	out, smap, errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
 	defer {
 		delete(transmute([]u8)out)
 		transpiler.source_map_destroy(&smap)
@@ -490,7 +490,7 @@ test_translate_expr_range_end_via_transpile :: proc(t: ^testing.T) {
 	nodes, parse_errs := transpiler.parse(tokens[:])
 	defer delete(nodes)
 	defer delete(parse_errs)
-	out, smap, errs := transpiler.transpile(nodes[:])
+	out, smap, errs := transpiler.transpile(nodes[:], transpiler.odin_transpile_options())
 	defer {
 		delete(transmute([]u8)out)
 		transpiler.source_map_destroy(&smap)
@@ -503,12 +503,12 @@ test_translate_expr_range_end_via_transpile :: proc(t: ^testing.T) {
 
 	// Weasel end of "name" is at offset 9.
 	weasel_end := transpiler.Position{offset = 9, line = 1, col = 10}
-	odin_end, ok := weasel_to_odin_range_end(&tr, weasel_end)
+	host_end, ok := weasel_to_odin_range_end(&tr, weasel_end)
 	testing.expect(t, ok, "weasel range end of $() expression should resolve")
 	// The character just before this Odin end must be 'e' (last byte of "name").
 	testing.expect(
 		t,
-		odin_end.offset > 0 && odin_end.offset <= len(out) && out[odin_end.offset - 1] == 'e',
+		host_end.offset > 0 && host_end.offset <= len(out) && out[host_end.offset - 1] == 'e',
 		"odin range end should point one past the 'e' of 'name'",
 	)
 }

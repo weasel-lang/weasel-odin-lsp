@@ -213,3 +213,11 @@ This initiative is in discovery. The following phases are planned once design is
 ## Open Questions
 
 No open questions remain. The `Host_Driver` interface boundary audit is complete — all Odin-specific emitter references are accounted for in the struct definition above.
+
+## Status Updates
+
+2026-04-27: All 4 tasks completed. Initiative implemented end-to-end:
+- WEASEL-T-0025: Transpiler fully parameterised via Host_Driver/Transpile_Options; all emit paths through driver; `emit_component_call_close` added for `<slot />` and component call closes
+- WEASEL-T-0026: `.weasel.json` config loader (`load_config`, `load_config_from_bytes`) with upward traversal; `Weasel_Config` struct; 8 unit tests covering full/partial/empty/malformed JSON and defaults
+- WEASEL-T-0027: Config wired into `cmd/weasel-c` and `cmd/weasel-lsp`; `Proxy_Options` with `transpile` field added to lsp package; `proxy_init` accepts options; all test helpers updated
+- WEASEL-T-0028: C3 host driver in `transpiler/c3_driver.odin`; `c3_transpile_options()`/`c3_default_weasel_config()`; `config_to_transpile_options` dispatches on host; 7 C3-specific unit tests; all 135+57+9 tests pass; all binaries build cleanly

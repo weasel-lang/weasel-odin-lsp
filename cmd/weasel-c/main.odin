@@ -59,6 +59,17 @@ main :: proc() {
 		os.exit(1)
 	}
 
+	// Load .weasel.json from the working directory (walking upward).
+	cwd, _ := os.get_working_directory(context.allocator)
+	defer delete(cwd)
+	cfg, cfg_err := transpiler.load_config(cwd)
+	if cfg_err != .None {
+		fmt.eprintfln("weasel: warning: malformed .weasel.json — using Odin defaults")
+		cfg = transpiler.odin_default_weasel_config()
+	}
+	defer transpiler.weasel_config_destroy(&cfg)
+	transpile_opts := transpiler.config_to_transpile_options(cfg)
+
 	skipped, generated, failed := 0, 0, 0
 
 	for in_path in cli.overflow {
@@ -71,7 +82,7 @@ main :: proc() {
 			continue
 		}
 
-		if _generate_file(in_path, out_path) {
+		if _generate_file(in_path, out_path, transpile_opts) {
 			fmt.printfln("  gen   %s -> %s", in_path, out_path)
 			generated += 1
 		} else {
@@ -134,7 +145,8 @@ _is_up_to_date :: proc(in_path, out_path: string) -> bool {
 // All intermediate allocations (tokens, AST nodes, error messages, transpiler
 // scratch strings) are made from a per-file arena.  The arena is freed on
 // return, so no individual cleanup of nested structures is required.
-_generate_file :: proc(in_path, out_path: string) -> bool {
+// opts is used for the transpile step; its preamble slice must outlive this call.
+_generate_file :: proc(in_path, out_path: string, opts: transpiler.Transpile_Options) -> bool {
 	// --- Arena setup ---
 	backing := make([]byte, 4 * mem.Megabyte)
 	defer delete(backing)
@@ -174,7 +186,7 @@ _generate_file :: proc(in_path, out_path: string) -> bool {
 	// The source map is not used by the CLI generator; it exists for the
 	// weasel-lsp proxy.  Allocations go through the same arena as the rest
 	// of this procedure, so no explicit cleanup is required.
-	source, _, transpile_errs := transpiler.transpile(nodes[:])
+	source, _, transpile_errs := transpiler.transpile(nodes[:], opts)
 
 	if len(transpile_errs) > 0 {
 		for e in transpile_errs {

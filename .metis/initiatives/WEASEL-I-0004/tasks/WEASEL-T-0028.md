@@ -4,14 +4,14 @@ level: task
 title: "Implement minimal C3 host driver and validate end-to-end"
 short_code: "WEASEL-T-0028"
 created_at: 2026-04-27T10:37:05.865830+00:00
-updated_at: 2026-04-27T10:37:05.865830+00:00
+updated_at: 2026-04-27T11:43:38.960669+00:00
 parent: WEASEL-I-0004
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -44,6 +44,10 @@ Key differences from the Odin driver:
 `emit_raw_string` and `emit_escaped_string` are now full proc fields on the driver — they emit the entire call-site expression, not just a symbol name. This is what allows a future C++ driver to emit `out << s` with no function call at all.
 
 Exact C3 values to be confirmed during implementation by referencing C3 language docs.
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 

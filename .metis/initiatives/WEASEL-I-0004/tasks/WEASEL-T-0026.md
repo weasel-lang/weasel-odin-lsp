@@ -4,14 +4,14 @@ level: task
 title: "Implement .weasel.json config loader with upward directory traversal"
 short_code: "WEASEL-T-0026"
 created_at: 2026-04-27T10:36:57.490850+00:00
-updated_at: 2026-04-27T10:36:57.490850+00:00
+updated_at: 2026-04-27T11:33:24.119242+00:00
 parent: WEASEL-I-0004
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -40,6 +40,10 @@ Create a config loader (in a new `config/` package or within `transpiler/`) that
 ```
 
 `write_raw` and `write_escaped` are no longer config fields — emission is fully owned by the driver's `emit_raw_string`/`emit_escaped_string` procs and cannot be overridden by a string substitution. All fields are optional; missing fields fall back to the active driver's defaults.
+
+## Acceptance Criteria
+
+## Acceptance Criteria
 
 ## Acceptance Criteria
 

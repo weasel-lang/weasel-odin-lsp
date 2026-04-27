@@ -15,13 +15,13 @@ _spt :: proc(src: string) -> (string, [dynamic]Transpile_Error) {
 	nodes, parse_errs := parse(tokens[:])
 	defer delete(parse_errs)
 	defer delete(nodes)
-	source, smap, errs := transpile(nodes[:])
+	source, smap, errs := transpile(nodes[:], odin_transpile_options())
 	source_map_destroy(&smap)
 	return source, errs
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Span passthrough
+// Host_Span passthrough
 // ---------------------------------------------------------------------------
 
 @(test)
@@ -404,7 +404,7 @@ test_transpile_static_text_escaping :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Block (control-flow with nested elements)
+// Host_Block (control-flow with nested elements)
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -569,7 +569,7 @@ test_transpile_dynamic_attr_expr_verbatim :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Block (control-flow with nested elements)
+// Host_Block (control-flow with nested elements)
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------

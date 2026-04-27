@@ -4,14 +4,14 @@ level: task
 title: "Rename Odin_* identifiers to Host_* throughout the codebase"
 short_code: "WEASEL-T-0023"
 created_at: 2026-04-27T10:36:46.320917+00:00
-updated_at: 2026-04-27T10:36:46.320917+00:00
+updated_at: 2026-04-27T11:16:22.082420+00:00
 parent: WEASEL-I-0004
 blocked_by: []
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -41,6 +41,10 @@ Update comments that say "Odin" when they mean "host language" (e.g., "verbatim 
 
 ## Acceptance Criteria
 
+## Acceptance Criteria
+
+## Acceptance Criteria
+
 - [ ] No occurrences of `Odin_Span`, `Odin_Block`, `Odin_Text` remain in `transpiler/` or `lsp/`
 - [ ] `odin_start`/`odin_end` field names replaced (or confirmed they should stay as positional names)
 - [ ] `odin run tests/` passes with no golden file changes
@@ -50,6 +54,6 @@ Update comments that say "Odin" when they mean "host language" (e.g., "verbatim 
 
 Safe to execute before any other task in this initiative. No logic changes — rename only. Use `grep -r "Odin_" transpiler/ lsp/` to find all occurrences before starting.
 
-## Status Updates **[REQUIRED]**
+## Status Updates
 
-*To be added during implementation*
+2026-04-27: Completed. Renamed all `Odin_Span`→`Host_Span`, `Odin_Block`→`Host_Block`, `Odin_Text`→`Host_Text` across transpiler/ and lsp/. Renamed `odin_start`/`odin_end` fields on `Span_Entry` to `host_start`/`host_end`, updated all callers. Also renamed `odin_sorted` on `Translator` to `host_sorted`, and `_emit_odin_text`/`_emit_odin_block`/`_ppush_odin` to `_emit_host_text`/`_emit_host_block`/`_ppush_host`. All 120 transpiler tests, 57 LSP tests, and 9 corpus tests pass.

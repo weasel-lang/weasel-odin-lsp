@@ -1,8 +1,8 @@
 /*
 	LSP-side index over a transpiler Source_Map.
 
-	The transpiler returns its Span_Entry slice sorted by odin_start.offset so
-	ols responses (keyed by Odin positions) can be rewritten cheaply.  LSP
+	The transpiler returns its Span_Entry slice sorted by host_start.offset so
+	host responses (keyed by host positions) can be rewritten cheaply.  LSP
 	requests from the editor arrive in Weasel coordinates and need the inverse
 	lookup, which requires a second ordering of the same entries keyed by
 	weasel_start.offset.  This file owns that second ordering and the
@@ -20,25 +20,25 @@ import "core:slice"
 import "../transpiler"
 
 // Translator bundles the two orderings over a Source_Map's entries.
-// odin_sorted is borrowed from the Source_Map (no copy); weasel_sorted is an
+// host_sorted is borrowed from the Source_Map (no copy); weasel_sorted is an
 // owned copy sorted by weasel_start.offset.
 //
 // The Translator holds a direct slice into Source_Map.entries, so the
 // owning Source_Map must outlive the Translator.
 Translator :: struct {
-	odin_sorted:   []transpiler.Span_Entry,
+	host_sorted:   []transpiler.Span_Entry,
 	weasel_sorted: [dynamic]transpiler.Span_Entry,
 }
 
 // translator_make builds a Translator over sm.  The returned struct shares
-// its odin_sorted slice with sm.entries and owns its weasel_sorted.  Pair
+// its host_sorted slice with sm.entries and owns its weasel_sorted.  Pair
 // with translator_destroy.
 translator_make :: proc(
 	sm: ^transpiler.Source_Map,
 	allocator := context.allocator,
 ) -> Translator {
 	t: Translator
-	t.odin_sorted = sm.entries[:]
+	t.host_sorted = sm.entries[:]
 	t.weasel_sorted = make([dynamic]transpiler.Span_Entry, 0, len(sm.entries), allocator)
 	for entry in sm.entries {
 		append(&t.weasel_sorted, entry)
@@ -50,15 +50,15 @@ translator_make :: proc(
 }
 
 // translator_destroy releases the owned weasel_sorted slice.  The borrowed
-// odin_sorted slice is left alone — it belongs to the Source_Map.  Safe to
+// host_sorted slice is left alone — it belongs to the Source_Map.  Safe to
 // call on a zero-value Translator.
 translator_destroy :: proc(t: ^Translator) {
 	delete(t.weasel_sorted)
 	t.weasel_sorted = nil
-	t.odin_sorted = nil
+	t.host_sorted = nil
 }
 
-// odin_to_weasel translates an Odin position to its originating Weasel
+// odin_to_weasel translates a host position to its originating Weasel
 // position.  Returns (zero, false) when the position falls between spans or
 // outside the map's coverage (e.g. inside generated scaffolding such as
 // `proc(` that has no Weasel origin).  Runs in O(log n).
@@ -66,13 +66,13 @@ odin_to_weasel :: proc(
 	t: ^Translator,
 	pos: transpiler.Position,
 ) -> (transpiler.Position, bool) {
-	entry, ok := _find_span(t.odin_sorted, pos.offset, true)
+	entry, ok := _find_span(t.host_sorted, pos.offset, true)
 	if !ok {return {}, false}
-	return _interpolate(pos, entry.odin_start, entry.weasel_start), true
+	return _interpolate(pos, entry.host_start, entry.weasel_start), true
 }
 
 // weasel_to_odin translates a Weasel position to its corresponding position
-// in the generated Odin.  Returns (zero, false) when no span covers the
+// in the generated host output.  Returns (zero, false) when no span covers the
 // given Weasel position (e.g. interior of a whitespace-only region or a
 // comment that was not emitted).  Runs in O(log n).
 weasel_to_odin :: proc(
@@ -81,13 +81,13 @@ weasel_to_odin :: proc(
 ) -> (transpiler.Position, bool) {
 	entry, ok := _find_span(t.weasel_sorted[:], pos.offset, false)
 	if !ok {return {}, false}
-	return _interpolate(pos, entry.weasel_start, entry.odin_start), true
+	return _interpolate(pos, entry.weasel_start, entry.host_start), true
 }
 
-// odin_to_weasel_range_end translates an Odin offset that lies at the
+// odin_to_weasel_range_end translates a host offset that lies at the
 // *exclusive* end of an LSP Range.  LSP ranges are half-open, so the end
 // position of a token-sized range coincides with the span's exclusive
-// `odin_end` — and `odin_to_weasel` correctly returns false there
+// `host_end` — and `odin_to_weasel` correctly returns false there
 // (nothing is "inside" a zero-width slice).  This variant additionally
 // succeeds when the target matches a span's end boundary and returns
 // that span's `weasel_end`.  Used when rewriting Range.end so an LSP
@@ -97,15 +97,15 @@ odin_to_weasel_range_end :: proc(
 	pos: transpiler.Position,
 ) -> (transpiler.Position, bool) {
 	if got, ok := odin_to_weasel(t, pos); ok {return got, true}
-	for e in t.odin_sorted {
-		if e.odin_end.offset == pos.offset {return e.weasel_end, true}
+	for e in t.host_sorted {
+		if e.host_end.offset == pos.offset {return e.weasel_end, true}
 	}
 	return {}, false
 }
 
 // weasel_to_odin_range_end is the inverse half-open variant used on
 // request rewriting.  Succeeds inside a span (via `weasel_to_odin`) or
-// when the target matches a span's `weasel_end`, returning `odin_end`
+// when the target matches a span's `weasel_end`, returning `host_end`
 // of that span.
 weasel_to_odin_range_end :: proc(
 	t: ^Translator,
@@ -113,7 +113,7 @@ weasel_to_odin_range_end :: proc(
 ) -> (transpiler.Position, bool) {
 	if got, ok := weasel_to_odin(t, pos); ok {return got, true}
 	for e in t.weasel_sorted {
-		if e.weasel_end.offset == pos.offset {return e.odin_end, true}
+		if e.weasel_end.offset == pos.offset {return e.host_end, true}
 	}
 	return {}, false
 }
@@ -134,7 +134,7 @@ _find_span :: proc(
 	for lo < hi {
 		mid := (lo + hi) / 2
 		end_off :=
-			entries[mid].odin_end.offset if odin_side else entries[mid].weasel_end.offset
+			entries[mid].host_end.offset if odin_side else entries[mid].weasel_end.offset
 		if end_off > target {
 			hi = mid
 		} else {
@@ -143,7 +143,7 @@ _find_span :: proc(
 	}
 	if lo == n {return {}, false}
 	entry := entries[lo]
-	start_off := entry.odin_start.offset if odin_side else entry.weasel_start.offset
+	start_off := entry.host_start.offset if odin_side else entry.weasel_start.offset
 	if target < start_off {return {}, false}
 	return entry, true
 }
@@ -153,7 +153,7 @@ _find_span :: proc(
 // translation preserves byte offset and line-break deltas; columns are
 // carried over unchanged for any target line past the span's first, and
 // interpolated column-wise on the first line.  This is exact for spans
-// whose Weasel and Odin text are byte-identical (e.g. Odin passthrough) and
+// whose Weasel and host text are byte-identical (e.g. host passthrough) and
 // does the right thing for single-line identifiers of differing length
 // (e.g. `card` -> `Card_Props`), where the offset delta still lands inside
 // or at the end of the target identifier.

@@ -10,7 +10,7 @@ test_pure_odin_passthrough :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect_value(t, len(tokens), 2) // OdinText + EOF
-	testing.expect_value(t, tokens[0].kind, Token_Kind.Odin_Text)
+	testing.expect_value(t, tokens[0].kind, Token_Kind.Host_Text)
 	testing.expect_value(t, tokens[0].value, "x := 42\n")
 	testing.expect_value(t, tokens[1].kind, Token_Kind.EOF)
 }
@@ -178,13 +178,13 @@ test_odin_text_before_and_after :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errs), 0)
 	// OdinText Element_Open Element_Close OdinText EOF
 	testing.expect_value(t, len(tokens), 5)
-	testing.expect_value(t, tokens[0].kind, Token_Kind.Odin_Text)
+	testing.expect_value(t, tokens[0].kind, Token_Kind.Host_Text)
 	testing.expect_value(t, tokens[0].value, "before := 1\n")
 	testing.expect_value(t, tokens[1].kind, Token_Kind.Element_Open)
 	testing.expect_value(t, tokens[1].value, "div")
 	testing.expect_value(t, tokens[2].kind, Token_Kind.Element_Close)
 	testing.expect_value(t, tokens[2].value, "div")
-	testing.expect_value(t, tokens[3].kind, Token_Kind.Odin_Text)
+	testing.expect_value(t, tokens[3].kind, Token_Kind.Host_Text)
 	testing.expect_value(t, tokens[3].value, "\nafter := 2\n")
 }
 
@@ -304,7 +304,7 @@ test_dollar_sign_in_odin_passthrough :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect_value(t, len(tokens), 2) // OdinText + EOF
-	testing.expect_value(t, tokens[0].kind, Token_Kind.Odin_Text)
+	testing.expect_value(t, tokens[0].kind, Token_Kind.Host_Text)
 }
 
 @(test)

@@ -1,0 +1,5 @@
+module views;
+
+greet :: template() {
+    <p>Hello</p>
+}

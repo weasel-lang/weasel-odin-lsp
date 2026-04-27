@@ -15,7 +15,7 @@ _spt_with_map :: proc(
 	nodes, parse_errs := parse(tokens[:])
 	defer delete(parse_errs)
 	defer delete(nodes)
-	return transpile(nodes[:])
+	return transpile(nodes[:], odin_transpile_options())
 }
 
 // _find_span_for_odin_text returns the first Span_Entry whose odin range
@@ -27,9 +27,9 @@ _find_span_for_odin_text :: proc(
 	literal: string,
 ) -> (Span_Entry, bool) {
 	for entry in smap.entries {
-		if entry.odin_start.offset < 0 {continue}
-		if entry.odin_end.offset > len(output) {continue}
-		if output[entry.odin_start.offset:entry.odin_end.offset] == literal {
+		if entry.host_start.offset < 0 {continue}
+		if entry.host_end.offset > len(output) {continue}
+		if output[entry.host_start.offset:entry.host_end.offset] == literal {
 			return entry, true
 		}
 	}
@@ -74,7 +74,7 @@ test_source_map_odin_passthrough_spans :: proc(t: ^testing.T) {
 	// The passthrough Odin span must cover the entire source verbatim.
 	found := false
 	for entry in smap.entries {
-		if entry.odin_start.offset == 0 && entry.odin_end.offset == len(out) {
+		if entry.host_start.offset == 0 && entry.host_end.offset == len(out) {
 			testing.expect_value(t, entry.weasel_start, Position{offset = 0, line = 1, col = 1})
 			testing.expect_value(t, entry.weasel_end, Position{offset = 8, line = 2, col = 1})
 			found = true
@@ -105,8 +105,8 @@ test_source_map_procedure_name :: proc(t: ^testing.T) {
 	testing.expect(t, found, "no span entry covers the 'greet' proc name in the output")
 
 	// Odin side: "greet" is on line 3 — shifted by the two auto-injected import lines.
-	testing.expect_value(t, entry.odin_start, Position{offset = 37, line = 3, col = 1})
-	testing.expect_value(t, entry.odin_end, Position{offset = 42, line = 3, col = 6})
+	testing.expect_value(t, entry.host_start, Position{offset = 37, line = 3, col = 1})
+	testing.expect_value(t, entry.host_end, Position{offset = 42, line = 3, col = 6})
 	// Weasel side: "greet" starts at offset 0 (no shift in the source file).
 	testing.expect_value(t, entry.weasel_start, Position{offset = 0, line = 1, col = 1})
 	testing.expect_value(t, entry.weasel_end, Position{offset = 5, line = 1, col = 6})
@@ -134,7 +134,7 @@ test_source_map_procedure_name_after_prefix :: proc(t: ^testing.T) {
 	// Odin: same offset — the import prefix was preserved verbatim.
 	odin_greet := strings.index(out, "greet")
 	testing.expect(t, odin_greet >= 0, "greet not in output")
-	testing.expect_value(t, entry.odin_start.offset, odin_greet)
+	testing.expect_value(t, entry.host_start.offset, odin_greet)
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ test_source_map_component_tag_with_props :: proc(t: ^testing.T) {
 @(test)
 test_source_map_entries_sorted_by_odin_offset :: proc(t: ^testing.T) {
 	// Run a moderately complex fixture through and verify the entries slice
-	// is monotonically non-decreasing in odin_start.offset.
+	// is monotonically non-decreasing in host_start.offset.
 	src := "greet :: template(name: string) {\n<p>Hello, $(name)!</p>\n}"
 	out, smap, errs := _spt_with_map(src)
 	defer {
@@ -269,8 +269,8 @@ test_source_map_entries_sorted_by_odin_offset :: proc(t: ^testing.T) {
 	testing.expect(t, len(smap.entries) >= 3, "expected at least 3 span entries for this fixture")
 
 	for i in 1 ..< len(smap.entries) {
-		prev := smap.entries[i - 1].odin_start.offset
-		cur  := smap.entries[i].odin_start.offset
+		prev := smap.entries[i - 1].host_start.offset
+		cur  := smap.entries[i].host_start.offset
 		testing.expectf(t, prev <= cur, "entries not sorted: [%d]=%d, [%d]=%d", i - 1, prev, i, cur)
 	}
 }
@@ -296,7 +296,7 @@ test_source_map_fixture_covers_key_identifiers :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Block (control-flow) head mapping
+// Host_Block (control-flow) head mapping
 // ---------------------------------------------------------------------------
 
 @(test)

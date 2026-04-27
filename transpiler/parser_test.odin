@@ -13,7 +13,7 @@ _sp :: proc(src: string) -> ([dynamic]Node, [dynamic]Parse_Error) {
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Span passthrough
+// Host_Span passthrough
 // ---------------------------------------------------------------------------
 
 @(test)
@@ -24,8 +24,8 @@ test_parse_pure_odin :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect_value(t, len(nodes), 1)
-	span, ok := nodes[0].(Odin_Span)
-	testing.expect(t, ok, "expected Odin_Span")
+	span, ok := nodes[0].(Host_Span)
+	testing.expect(t, ok, "expected Host_Span")
 	testing.expect_value(t, span.text, "x := 42\n")
 }
 
@@ -186,7 +186,7 @@ test_parse_deeply_nested :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Odin_Block (control-flow with nested elements)
+// Host_Block (control-flow with nested elements)
 // ---------------------------------------------------------------------------
 
 @(test)
@@ -199,19 +199,19 @@ test_parse_odin_block_for :: proc(t: ^testing.T) {
 	ul := nodes[0].(Element_Node)
 	testing.expect_value(t, len(ul.children), 1)
 
-	blk, ok := ul.children[0].(Odin_Block)
-	testing.expect(t, ok, "expected Odin_Block")
+	blk, ok := ul.children[0].(Host_Block)
+	testing.expect(t, ok, "expected Host_Block")
 	testing.expect_value(t, blk.head, "for x in items ")
 	testing.expect_value(t, blk.tail, "}")
 
-	// Body may include whitespace Odin_Spans around the element.
+	// Body may include whitespace Host_Spans around the element.
 	li_found := false
 	for child in blk.children {
 		if elem, is_elem := child.(Element_Node); is_elem && elem.tag == "li" {
 			li_found = true
 		}
 	}
-	testing.expect(t, li_found, "expected <li> in Odin_Block children")
+	testing.expect(t, li_found, "expected <li> in Host_Block children")
 }
 
 @(test)
@@ -222,8 +222,8 @@ test_parse_odin_block_if :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	div := nodes[0].(Element_Node)
-	blk, ok := div.children[0].(Odin_Block)
-	testing.expect(t, ok, "expected Odin_Block")
+	blk, ok := div.children[0].(Host_Block)
+	testing.expect(t, ok, "expected Host_Block")
 	testing.expect_value(t, blk.head, "if show ")
 
 	span_found := false
@@ -232,7 +232,7 @@ test_parse_odin_block_if :: proc(t: ^testing.T) {
 			span_found = true
 		}
 	}
-	testing.expect(t, span_found, "expected <span> in Odin_Block children")
+	testing.expect(t, span_found, "expected <span> in Host_Block children")
 }
 
 @(test)
@@ -259,8 +259,8 @@ test_parse_odin_block_leading_whitespace :: proc(t: ^testing.T) {
 		parent := nodes[0].(Element_Node)
 		testing.expect_value(t, len(parent.children), 1)
 
-		blk, ok := parent.children[0].(Odin_Block)
-		testing.expect(t, ok, "expected Odin_Block, got Expr_Node")
+		blk, ok := parent.children[0].(Host_Block)
+		testing.expect(t, ok, "expected Host_Block, got Expr_Node")
 		testing.expect_value(t, blk.head, c.head)
 		testing.expect_value(t, blk.tail, "}")
 	}
@@ -268,7 +268,7 @@ test_parse_odin_block_leading_whitespace :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_expr_delimiter :: proc(t: ^testing.T) {
-	// $() always produces Expr_Node; {} always produces Odin_Block.
+	// $() always produces Expr_Node; {} always produces Host_Block.
 	nodes, errs := _sp("<p>$(form.name)</p>")
 	defer delete(nodes)
 	defer delete(errs)
@@ -282,15 +282,15 @@ test_parse_expr_delimiter :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_block_delimiter :: proc(t: ^testing.T) {
-	// {} always produces Odin_Block regardless of content.
+	// {} always produces Host_Block regardless of content.
 	nodes, errs := _sp("<p>{form.name}</p>")
 	defer delete(nodes)
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
 	p := nodes[0].(Element_Node)
-	_, is_block := p.children[0].(Odin_Block)
-	testing.expect(t, is_block, "expected Odin_Block from {}")
+	_, is_block := p.children[0].(Host_Block)
+	testing.expect(t, is_block, "expected Host_Block from {}")
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +328,7 @@ test_parse_template_proc_with_slot :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_template_proc_pure_odin_body :: proc(t: ^testing.T) {
-	// A template with no element tokens — entire body in one Odin_Text.
+	// A template with no element tokens — entire body in one Host_Text.
 	src := "noop :: template() {\n    x := 42\n}\n"
 	nodes, errs := _sp(src)
 	defer delete(nodes)
@@ -343,7 +343,7 @@ test_parse_template_proc_pure_odin_body :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_template_proc_with_prefix :: proc(t: ^testing.T) {
-	// Odin code before the template declaration becomes an Odin_Span prefix.
+	// Odin code before the template declaration becomes an Host_Span prefix.
 	src := "Foo :: struct { x: int }\n\nfoo :: template() {\n    <br />\n}"
 	nodes, errs := _sp(src)
 	defer delete(nodes)
@@ -351,8 +351,8 @@ test_parse_template_proc_with_prefix :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, len(errs), 0)
 	testing.expect_value(t, len(nodes), 2)
-	_, is_span := nodes[0].(Odin_Span)
-	testing.expect(t, is_span, "expected Odin_Span prefix")
+	_, is_span := nodes[0].(Host_Span)
+	testing.expect(t, is_span, "expected Host_Span prefix")
 	_, is_tp := nodes[1].(Template_Proc)
 	testing.expect(t, is_tp, "expected Template_Proc")
 }
@@ -366,7 +366,7 @@ test_parse_multiple_templates :: proc(t: ^testing.T) {
 	defer delete(errs)
 
 	testing.expect_value(t, len(errs), 0)
-	// Two Template_Procs; there may be Odin_Span nodes between them.
+	// Two Template_Procs; there may be Host_Span nodes between them.
 	tp_count := 0
 	for node in nodes {
 		if _, ok := node.(Template_Proc); ok {
